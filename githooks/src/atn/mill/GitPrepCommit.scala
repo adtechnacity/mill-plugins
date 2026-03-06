@@ -125,8 +125,12 @@ class GitPrepCommit(
       case Some(pattern) =>
         s"""|#In the footer:
             |#  you should specify the jira ticket with a line like: `Refs: PRJ-123`.
-            |#  document co-authors via `Co-Authored-By: Them <Them@${if (emailDomain.nonEmpty) emailDomain else "example.com"}>` lines.
-            |#  document reviewers via `Reviewed-By: Me <me@${if (emailDomain.nonEmpty) emailDomain else "example.com"}>` lines.""".stripMargin
+            |#  document co-authors via `Co-Authored-By: Them <Them@${
+             if (emailDomain.nonEmpty) emailDomain else "example.com"
+           }>` lines.
+            |#  document reviewers via `Reviewed-By: Me <me@${
+             if (emailDomain.nonEmpty) emailDomain else "example.com"
+           }>` lines.""".stripMargin
       case None          =>
         """|#In the footer:
            |#  document co-authors via `Co-Authored-By:` lines.""".stripMargin

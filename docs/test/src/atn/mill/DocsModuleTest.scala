@@ -38,9 +38,9 @@ object BasicDocsBuild extends TestRootModule:
     def scalaVersion = "3.8.2"
 
   object docs extends DocsModule:
-    def docProjectName          = "test-project"
-    def docVersion              = Task("0.1.0")
-    def docRootModule           = BasicDocsBuild
+    def docProjectName           = "test-project"
+    def docVersion               = Task("0.1.0")
+    def docRootModule            = BasicDocsBuild
     override def excludedModules = Set("excluded")
 
   lazy val millDiscover: Discover = Discover[this.type]

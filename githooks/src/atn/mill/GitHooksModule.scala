@@ -62,7 +62,9 @@ trait GitHooksModule extends DefaultTaskModule {
       val ev      = EvaluatorProxy(() => evaluator)
       val modules = validModules(ev.rootModule)
       val msg     = os.read(file)
-      val gpc     = GitRepo.repo.map(new GitPrepCommit(_, modules.toList, ev.baseLogger, ollamaUrl, ollamaModel, emailDomain, commitFooterPattern))
+      val gpc     = GitRepo.repo.map(
+        new GitPrepCommit(_, modules.toList, ev.baseLogger, ollamaUrl, ollamaModel, emailDomain, commitFooterPattern)
+      )
       gpc.map(gpc => os.write.over(file, gpc.prep(msg, source)))
     }
 

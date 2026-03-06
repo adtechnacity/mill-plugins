@@ -31,7 +31,7 @@ class GitInstall(gitHooksPath: Path, logger: Logger, preCommitExtraCommands: Seq
     os.write.over(
       path,
       s"""$filePrefix
-         |${extraLines}$cmd --meta-level 1 mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll && \\
+         |$extraLines$cmd --meta-level 1 mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll && \\
          |$cmd git.preCommit
          |""".stripMargin,
       perms

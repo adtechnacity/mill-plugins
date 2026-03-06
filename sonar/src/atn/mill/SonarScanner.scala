@@ -43,9 +43,10 @@ trait SonarScanner extends DefaultTaskModule {
   def coverageReportTaskPath: String = "scoverage.xmlReportAll"
 
   def sonar(evaluator: Evaluator) = Task.Command(exclusive = true)[Unit] {
-    val version = projectVersion()
+    val version                 = projectVersion()
     val aggRep: Result[PathRef] =
-      evaluator.evaluate(Seq(coverageReportTaskPath), SelectMode.Multi)
+      evaluator
+        .evaluate(Seq(coverageReportTaskPath), SelectMode.Multi)
         .flatMap(_.values)
         .map(_.head.asInstanceOf[PathRef])
     Result
@@ -148,10 +149,10 @@ object SonarScanner extends ExternalModule with SonarScanner {
   override def defaultTask(): String = "sonar"
 
   // Defaults for ExternalModule companion (not typically used directly)
-  def sonarHostUrl              = ""
-  def sonarProjectKey           = ""
-  def sonarProjectName          = ""
-  def projectVersion            = Task("")
+  def sonarHostUrl     = ""
+  def sonarProjectKey  = ""
+  def sonarProjectName = ""
+  def projectVersion   = Task("")
 
   val millInternalModule: Regex = """^mill\.scalalib.*""".r
   val dependentModule: Regex    = """^([\w\.]+)\.(\w+)$""".r
