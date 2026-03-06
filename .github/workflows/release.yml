@@ -45,7 +45,7 @@ jobs:
 
       - name: Publish to local staging
         if: steps.check_tag.outputs.exists == 'false'
-        run: ./mill __.publishM2Local /tmp/m2-staging
+        run: ./mill __.publishM2Local --m2RepoPath /tmp/m2-staging
 
       - name: Upload to GitHub Packages
         if: steps.check_tag.outputs.exists == 'false'
