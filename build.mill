@@ -1,0 +1,102 @@
+package build
+
+import mill._, scalalib._, publish._
+
+val millVersion = mill.util.BuildInfo.millVersion
+
+trait MillPluginModule extends ScalaModule with PublishModule {
+  def scalaVersion   = "3.8.2"
+  def publishVersion = "0.1.0-SNAPSHOT"
+
+  def pomSettings = PomSettings(
+    description = artifactName(),
+    organization = "com.adtechnacity",
+    url = "https://github.com/adtechnacity/mill-plugins",
+    licenses = Seq(License.`Apache-2.0`),
+    versionControl = VersionControl.github("adtechnacity", "mill-plugins"),
+    developers = Seq(Developer("adtechnacity", "Adtechnacity", "https://github.com/adtechnacity"))
+  )
+
+  def compileMvnDeps = super.compileMvnDeps() ++ Seq(
+    mvn"com.lihaoyi::mill-libs:$millVersion"
+  )
+
+  trait MillPluginTests extends ScalaTests {
+    def mvnDeps       = Seq(
+      mvn"com.lihaoyi::utest:0.9.5",
+      mvn"com.lihaoyi::mill-testkit:$millVersion",
+      mvn"com.lihaoyi::mill-libs:$millVersion",
+      mvn"org.scalacheck::scalacheck:1.19.0"
+    )
+    def testFramework = "utest.runner.Framework"
+  }
+}
+
+object core extends MillPluginModule {
+  def artifactName = "mill-core_mill1"
+  def mvnDeps = Seq(
+    mvn"com.lihaoyi::upickle:4.1.0",
+    mvn"org.eclipse.jgit:org.eclipse.jgit:7.5.0.202512021534-r"
+  )
+}
+
+object stryker4s extends MillPluginModule {
+  def artifactName = "mill-stryker4s_mill1"
+  def moduleDeps   = Seq(core)
+  def mvnDeps = Seq(
+    mvn"io.stryker-mutator::stryker4s-core:0.19.1",
+    mvn"io.stryker-mutator::stryker4s-command-runner:0.19.1",
+    mvn"co.fs2::fs2-core:3.12.2"
+  )
+
+  object test extends MillPluginTests
+}
+
+object scalafix extends MillPluginModule {
+  def artifactName = "mill-scalafix_mill1"
+  def mvnDeps = Seq(
+    mvn"com.goyeau::mill-scalafix_mill1:0.6.0"
+  )
+}
+
+object docs extends MillPluginModule {
+  def artifactName = "mill-docs_mill1"
+  def mvnDeps = Seq(
+    mvn"org.typelevel::cats-core:2.13.0",
+    mvn"com.lihaoyi::mill-contrib-scoverage:$millVersion"
+  )
+
+  object test extends MillPluginTests
+}
+
+object githooks extends MillPluginModule {
+  def artifactName = "mill-githooks_mill1"
+  def moduleDeps   = Seq(core)
+  def mvnDeps = Seq(
+    mvn"org.kapunga::fallatol-ollama:0.3.1",
+    mvn"org.eclipse.jgit:org.eclipse.jgit:7.5.0.202512021534-r",
+    mvn"com.lihaoyi::mainargs:0.7.6"
+  )
+
+  object test extends MillPluginTests
+}
+
+object sonar extends MillPluginModule {
+  def artifactName = "mill-sonar_mill1"
+  def moduleDeps   = Seq(core)
+  def mvnDeps = Seq(
+    mvn"org.sonarsource.scanner.lib:sonar-scanner-java-library:4.0.1.1587",
+    mvn"ch.qos.logback:logback-classic:1.5.32",
+    mvn"org.typelevel::cats-core:2.13.0"
+  )
+}
+
+object devx extends MillPluginModule {
+  def artifactName = "mill-devx_mill1"
+  def mvnDeps = Seq(
+    mvn"com.lihaoyi::requests:0.9.0",
+    mvn"com.lihaoyi::upickle:4.1.0"
+  )
+
+  object test extends MillPluginTests
+}

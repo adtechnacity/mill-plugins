@@ -1,0 +1,11 @@
+out/
+target/
+.bloop/
+.bsp/
+.metals/
+.idea/
+.vscode/
+*.class
+*.jar
+*.log
+.DS_Store
