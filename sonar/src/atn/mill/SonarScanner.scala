@@ -30,8 +30,8 @@ trait SonarScanner extends DefaultTaskModule {
   /** SonarQube project base directory. Defaults to workspace root. */
   def sonarProjectBaseDir: os.Path = BuildCtx.workspaceRoot
 
-  /** Current project version string. Must be overridden by consumers. */
-  def projectVersion: String
+  /** Current project version string as a Task. Must be overridden by consumers. */
+  def projectVersion: Task[String]
 
   /** Environment variable name for the SonarQube authentication token. */
   def sonarTokenEnvVar: String = "SONAR_TOKEN"
@@ -39,11 +39,15 @@ trait SonarScanner extends DefaultTaskModule {
   /** Environment variable name for the SonarQube log level. */
   def sonarLogLevelEnvVar: String = "SONAR_LOG_LEVEL"
 
-  /** Produce the coverage report path. Must be overridden by consumers. */
-  def coverageReportTask(evaluator: Evaluator): Result[PathRef]
+  /** Mill task path for the coverage report (e.g. "scoverage.xmlReportAll"). Resolved dynamically via evaluator. */
+  def coverageReportTaskPath: String = "scoverage.xmlReportAll"
 
   def sonar(evaluator: Evaluator) = Task.Command(exclusive = true)[Unit] {
-    val aggRep = coverageReportTask(evaluator)
+    val version = projectVersion()
+    val aggRep: Result[PathRef] =
+      evaluator.evaluate(Seq(coverageReportTaskPath), SelectMode.Multi)
+        .flatMap(_.values)
+        .map(_.head.asInstanceOf[PathRef])
     Result
       .create {
         val lc           = LoggerFactory.getILoggerFactory().asInstanceOf[LoggerContext]
@@ -59,7 +63,7 @@ trait SonarScanner extends DefaultTaskModule {
         }
         lc.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME).setLevel(logLevel)
       }
-      .flatMap(_ => initProps(aggRep, projectVersion))
+      .flatMap(_ => initProps(aggRep, version))
       .flatMap { props =>
         ScannerEngineBootstrapper
           .create("sonar-mill", "0.1")
@@ -147,8 +151,7 @@ object SonarScanner extends ExternalModule with SonarScanner {
   def sonarHostUrl              = ""
   def sonarProjectKey           = ""
   def sonarProjectName          = ""
-  def projectVersion            = ""
-  def coverageReportTask(evaluator: Evaluator) = Result.Failure("coverageReportTask must be overridden")
+  def projectVersion            = Task("")
 
   val millInternalModule: Regex = """^mill\.scalalib.*""".r
   val dependentModule: Regex    = """^([\w\.]+)\.(\w+)$""".r
