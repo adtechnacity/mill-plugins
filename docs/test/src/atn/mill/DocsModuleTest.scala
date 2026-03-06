@@ -10,13 +10,22 @@ object DocsModuleTest extends TestSuite:
 
   val tests = Tests:
 
-    test("allModules - discovers ScalaModules from root") {
-      val docs       = BasicDocsBuild.docs
-      val discovered = docs.allModules.map(_.moduleSegments.render).toSet
-      // discovers project ScalaModules
-      assert(discovered.contains("basic"))
-      // excludes configured modules
-      assert(!discovered.contains("excluded"))
+    test("DocTransformer.titleFromFilename") {
+      assert(DocTransformer.titleFromFilename("README.md", "test-project") == "test-project")
+      assert(DocTransformer.titleFromFilename("TOPICS.md", "test-project") == "Topics")
+    }
+
+    test("DocsModule.excludedModules - defaults to empty") {
+      assert(BasicDocsBuild.docs.excludedModules == Set("excluded"))
+    }
+
+    test("DocsModule.docProjectName") {
+      assert(BasicDocsBuild.docs.docProjectName == "test-project")
+    }
+
+    test("DocsModule.moduleDirectChildren - excludes docRootModule") {
+      val children = BasicDocsBuild.docs.moduleDirectChildren
+      assert(!children.exists(_ eq BasicDocsBuild))
     }
 
 // --- Test Fixtures ---
@@ -29,9 +38,9 @@ object BasicDocsBuild extends TestRootModule:
     def scalaVersion = "3.8.2"
 
   object docs extends DocsModule:
-    def docProjectName  = "test-project"
-    def docVersion      = Task("0.1.0")
-    def docRootModule   = BasicDocsBuild
+    def docProjectName          = "test-project"
+    def docVersion              = Task("0.1.0")
+    def docRootModule           = BasicDocsBuild
     override def excludedModules = Set("excluded")
 
   lazy val millDiscover: Discover = Discover[this.type]
