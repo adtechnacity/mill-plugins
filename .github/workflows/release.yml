@@ -44,15 +44,7 @@ jobs:
 
       - name: Publish to GitHub Packages
         if: steps.check_tag.outputs.exists == 'false'
-        run: |
-          ./mill __.publish \
-            --sonatypeUri https://maven.pkg.github.com/adtechnacity/mill-plugins \
-            --sonatypeSnapshotUri https://maven.pkg.github.com/adtechnacity/mill-plugins \
-            --readTimeout 600000 \
-            --awaitTimeout 600000 \
-            --signed false \
-            --gpgArgs "" \
-            --credentials "$GITHUB_ACTOR:$GITHUB_TOKEN"
+        run: ./mill __.publish --sonatypeCreds "$GITHUB_ACTOR:$GITHUB_TOKEN" --signed false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

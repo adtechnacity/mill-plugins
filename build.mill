@@ -13,6 +13,9 @@ trait MillPluginModule extends ScalaModule with PublishModule {
   def scalaVersion   = "3.8.2"
   def publishVersion = projectVersion.currentVersion().toString
 
+  def sonatypeUri         = "https://maven.pkg.github.com/adtechnacity/mill-plugins"
+  def sonatypeSnapshotUri = "https://maven.pkg.github.com/adtechnacity/mill-plugins"
+
   def pomSettings = PomSettings(
     description = artifactName(),
     organization = "com.adtechnacity",
