@@ -43,9 +43,20 @@ jobs:
         if: steps.check_tag.outputs.exists == 'false'
         run: ./mill __.test
 
-      - name: Publish to GitHub Packages
+      - name: Publish to local staging
         if: steps.check_tag.outputs.exists == 'false'
-        run: ./mill __.publish --sonatypeCreds "$GITHUB_ACTOR:$GITHUB_TOKEN" --signed false
+        run: ./mill __.publishM2Local /tmp/m2-staging
+
+      - name: Upload to GitHub Packages
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          find /tmp/m2-staging/com/adtechnacity -type f | while read -r file; do
+            rel="${file#/tmp/m2-staging/}"
+            url="https://maven.pkg.github.com/adtechnacity/mill-plugins/$rel"
+            echo "Uploading $rel"
+            curl -sf -X PUT -u "$GITHUB_ACTOR:$GITHUB_TOKEN" \
+              --upload-file "$file" "$url" || true
+          done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
