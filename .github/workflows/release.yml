@@ -11,7 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,22 +42,23 @@ jobs:
         if: steps.check_tag.outputs.exists == 'false'
         run: ./mill __.test
 
-      - name: Publish to local staging
+      - name: Import GPG key
         if: steps.check_tag.outputs.exists == 'false'
-        run: ./mill __.publishM2Local --m2RepoPath /tmp/m2-staging
+        run: echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
 
-      - name: Upload to GitHub Packages
+      - name: Publish to Sonatype
         if: steps.check_tag.outputs.exists == 'false'
         run: |
-          find /tmp/m2-staging/com/adtechnacity -type f | while read -r file; do
-            rel="${file#/tmp/m2-staging/}"
-            url="https://maven.pkg.github.com/adtechnacity/mill-plugins/$rel"
-            echo "Uploading $rel"
-            curl -sf -X PUT -u "$GITHUB_ACTOR:$GITHUB_TOKEN" \
-              --upload-file "$file" "$url" || true
-          done
+          ./mill __.publish \
+            --sonatypeCreds "$SONATYPE_USERNAME:$SONATYPE_PASSWORD" \
+            --gpgArgs --passphrase="$GPG_PASSPHRASE",--batch,--yes,-a,-b \
+            --release true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Create tag and GitHub release
         if: steps.check_tag.outputs.exists == 'false'
