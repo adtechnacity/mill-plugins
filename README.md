@@ -20,8 +20,8 @@ Add to your `mill-build/build.mill`:
 
 ```scala
 def mvnDeps = Seq(
-  mvn"com.adtechnacity::mill-stryker4s_mill1:0.1.0",
-  mvn"com.adtechnacity::mill-githooks_mill1:0.1.0",
+  mvn"com.adtechnacity::mill-stryker4s::0.1.0",
+  mvn"com.adtechnacity::mill-githooks::0.1.0",
   // ... etc
 )
 ```
