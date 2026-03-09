@@ -1,0 +1,21 @@
+package build
+
+import mill._, scalalib._
+import atn.mill._
+
+// ReleaseModule generates CHANGELOG.md from conventional commits.
+// Use alongside Mill's built-in VersionFileModule for version bumping and tagging.
+//
+// Release workflow:
+//   ./mill projectVersion.setNextVersion --bump minor
+//   ./mill release.changelog
+//   ./mill projectVersion.tag
+object release extends ReleaseModule
+
+/** Usage
+
+> ./mill resolve release._
+...changelog...
+...unreleased...
+
+*/

@@ -60,6 +60,21 @@ jobs:
           SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
+      - name: Extract release notes from CHANGELOG.md
+        if: steps.check_tag.outputs.exists == 'false'
+        id: notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Extract the section for this version (between its ## header and the next ## or EOF)
+          NOTES=$(sed -n "/^## \[$VERSION\]/,/^## \[/{/^## \[$VERSION\]/p; /^## \[/!p}" CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="Release v$VERSION"
+          fi
+          # Use delimiter for multiline output
+          echo "body<<RELEASE_NOTES_EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_NOTES_EOF" >> "$GITHUB_OUTPUT"
+
       - name: Create tag and GitHub release
         if: steps.check_tag.outputs.exists == 'false'
         run: |
@@ -67,6 +82,6 @@ jobs:
           git push origin "v${{ steps.version.outputs.version }}"
           gh release create "v${{ steps.version.outputs.version }}" \
             --title "v${{ steps.version.outputs.version }}" \
-            --generate-notes
+            --notes "${{ steps.notes.outputs.body }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

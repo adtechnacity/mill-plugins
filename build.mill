@@ -149,6 +149,16 @@ object sonar extends MillPluginModule {
   }
 }
 
+object release extends MillPluginModule {
+  def artifactName = "mill-release_mill1"
+  def moduleDeps   = Seq(core)
+
+  object test    extends MillPluginTests
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(core, release)
+  }
+}
+
 object devx extends MillPluginModule {
   def artifactName = "mill-devx_mill1"
   def mvnDeps = Seq(

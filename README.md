@@ -12,6 +12,7 @@ Custom [Mill](https://mill-build.org/) build plugins for Scala projects.
 | githooks | `mill-githooks_mill1` | Git hooks (formatting, testing, commit validation) | [example](githooks/example/resources/example-githooks/build.mill) |
 | sonar | `mill-sonar_mill1` | SonarQube scanner integration | [example](sonar/example/resources/example-sonar/build.mill) |
 | devx | `mill-devx_mill1` | Developer experience (CodeScene, Port.io) | [example](devx/example/resources/example-devx/build.mill) |
+| release | `mill-release_mill1` | Changelog generation and release management | [example](release/example/resources/example-release/build.mill) |
 
 ## Usage
 
