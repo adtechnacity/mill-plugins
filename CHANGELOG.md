@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.2] - 2026-03-10
+
+### Added
+
+- add MiMa binary compatibility checks and reinstate release plugin
+- **ci**: add Scala Steward and dependency caching
+
+### Other
+
+- set next development version 0.2.2-SNAPSHOT
+
 ## [0.2.1] - 2026-03-10
 
 ### Added
