@@ -33,6 +33,20 @@ trait ReleaseModule extends DefaultTaskModule:
   /** Conventional commit type to changelog section mapping. */
   def typeMapping: Map[String, String] = ChangelogGenerator.DefaultTypeMapping
 
+  /**
+   * Automatically release based on unreleased conventional commits.
+   *
+   * Breaking changes (`!` suffix or `BREAKING CHANGE` footer) trigger a major bump, `feat` commits trigger a minor
+   * bump, and anything else (fix, chore, etc.) triggers a patch bump. Fails if there are no releasable commits.
+   */
+  def release() = Task.Command[Unit] {
+    val commits = unreleasedCommits()
+    if commits.isEmpty then throw new RuntimeException("No unreleased conventional commits found")
+    val bump    = inferBump(commits)
+    val result  = performRelease(bump)
+    Task.log.info(result)
+  }
+
   /** Perform a patch release (bump patch from last tag). */
   def patch() = Task.Command[Unit] {
     val result = performRelease("patch")
@@ -74,7 +88,13 @@ trait ReleaseModule extends DefaultTaskModule:
     section
   }
 
-  override def defaultTask(): String = "changelog"
+  override def defaultTask(): String = "release"
+
+  /** Infer bump type from conventional commits: breaking → major, feat → minor, else → patch. */
+  private def inferBump(commits: List[ConventionalCommit]): String =
+    if commits.exists(_.breaking) then "major"
+    else if commits.exists(_.typ == "feat") then "minor"
+    else "patch"
 
   /**
    * Execute the full release cycle for the given bump type. Returns a summary string for logging.

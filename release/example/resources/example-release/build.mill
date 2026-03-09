@@ -5,10 +5,13 @@ import atn.mill._
 
 // ReleaseModule automates the full release cycle from conventional commits.
 //
-// Release commands (recommended):
-//   ./mill release.minor   # bump minor, changelog, commit, tag, set next dev version
-//   ./mill release.patch   # bump patch, changelog, commit, tag, set next dev version
-//   ./mill release.major   # bump major, changelog, commit, tag, set next dev version
+// Automatic release (infers bump type from commits):
+//   ./mill release            # breaking→major, feat→minor, else→patch
+//
+// Explicit release commands:
+//   ./mill release.patch      # bump patch, changelog, commit, tag, set next dev version
+//   ./mill release.minor      # bump minor, changelog, commit, tag, set next dev version
+//   ./mill release.major      # bump major, changelog, commit, tag, set next dev version
 //
 // Standalone commands:
 //   ./mill release.changelog    # generate CHANGELOG.md without releasing
@@ -22,6 +25,7 @@ object release extends ReleaseModule
 ...major...
 ...minor...
 ...patch...
+...release...
 ...unreleased...
 
 */
