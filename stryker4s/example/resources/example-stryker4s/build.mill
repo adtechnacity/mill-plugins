@@ -1,0 +1,44 @@
+package build
+
+import mill._, scalalib._
+import atn.mill._
+
+// Mix Stryker4sModule into any ScalaModule to enable mutation testing.
+// Configure thresholds, reporters, and excluded mutations as needed.
+object example extends ScalaModule with Stryker4sModule {
+  def scalaVersion   = "3.8.2"
+  def strykerVersion = "0.19.1"
+
+  // Customise mutation testing behaviour
+  override def strykerThresholds       = StrykerThresholds(high = 90, low = 70, break = 50)
+  override def strykerReporters        = Seq("console", "html", "json")
+  override def strykerExcludedMutations = Seq("StringLiteral")
+
+  object test extends ScalaTests with TestModule.Utest {
+    def mvnDeps = Seq(mvn"com.lihaoyi::utest:0.9.5")
+  }
+}
+
+// Aggregate reports across all modules using Stryker4sReport
+object stryker4s extends DefaultTaskModule with Stryker4sReport {
+  override def defaultTask(): String = "jsonReportAll"
+}
+
+/** Usage
+
+> ./mill resolve example.strykerConf
+example.strykerConf
+
+> ./mill resolve example.strykerMutate
+example.strykerMutate
+
+> ./mill resolve example.strykerMutateExternal
+example.strykerMutateExternal
+
+> ./mill resolve example.strykerJsonReport
+example.strykerJsonReport
+
+> ./mill resolve stryker4s.jsonReportAll
+stryker4s.jsonReportAll
+
+*/

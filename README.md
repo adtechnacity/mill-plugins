@@ -2,26 +2,25 @@
 
 Custom [Mill](https://mill-build.org/) build plugins for Scala projects.
 
-## Modules
+## Plugins
 
-| Module | Artifact | Description |
-|--------|----------|-------------|
-| core | `mill-core_mill1` | Shared utilities (git helpers, Result extensions, WorkDone ADT) |
-| stryker4s | `mill-stryker4s_mill1` | Mutation testing via Stryker4s |
-| scalafix | `mill-scalafix_mill1` | Scalafix wrapper for Mill |
-| docs | `mill-docs_mill1` | Scaladoc site generation |
-| githooks | `mill-githooks_mill1` | Git hooks (formatting, testing, commit validation) |
-| sonar | `mill-sonar_mill1` | SonarQube scanner integration |
-| devx | `mill-devx_mill1` | Developer experience (CodeScene, Port.io) |
+| Module | Artifact | Description | Example |
+|--------|----------|-------------|---------|
+| stryker4s | `mill-stryker4s_mill1` | Mutation testing via Stryker4s | [example](stryker4s/example/resources/example-stryker4s/build.mill) |
+| scalafix | `mill-scalafix_mill1` | Scalafix wrapper for Mill | [example](scalafix/example/resources/example-scalafix/build.mill) |
+| docs | `mill-docs_mill1` | Scaladoc site generation | [example](docs/example/resources/example-docs/build.mill) |
+| githooks | `mill-githooks_mill1` | Git hooks (formatting, testing, commit validation) | [example](githooks/example/resources/example-githooks/build.mill) |
+| sonar | `mill-sonar_mill1` | SonarQube scanner integration | [example](sonar/example/resources/example-sonar/build.mill) |
+| devx | `mill-devx_mill1` | Developer experience (CodeScene, Port.io) | [example](devx/example/resources/example-devx/build.mill) |
 
 ## Usage
 
-Add to your `mill-build/build.mill`:
+Add the plugin(s) you want to your `mill-build/build.mill`:
 
 ```scala
 def mvnDeps = Seq(
-  mvn"com.adtechnacity::mill-stryker4s::0.1.0",
-  mvn"com.adtechnacity::mill-githooks::0.1.0",
+  mvn"com.adtechnacity::mill-stryker4s_mill1:0.1.0",
+  mvn"com.adtechnacity::mill-githooks_mill1:0.1.0",
   // ... etc
 )
 ```

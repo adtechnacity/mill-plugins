@@ -1,0 +1,23 @@
+package build
+
+import mill._, scalalib._
+import atn.mill._
+
+// DeveloperExperience provides CodeScene and Port.io integration for
+// team management, developer tracking, and project configuration export/import.
+// Requires CODESCENE_TOKEN and PORTIO_TOKEN environment variables.
+object devx extends DeveloperExperience {
+  override def defaultTask(): String = "upsertTeams"
+}
+
+/** Usage
+
+> ./mill resolve devx._
+...upsertTeams...
+...developerList...
+...exportAll...
+...exportProject...
+...importProject...
+...importTeams...
+
+*/

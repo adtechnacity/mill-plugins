@@ -1,0 +1,36 @@
+package build
+
+import mill._, scalalib._
+import atn.mill._
+
+// Application modules — DocsModule discovers these automatically
+object app extends ScalaModule {
+  def scalaVersion = "3.8.2"
+}
+
+object libs extends Module {
+  object utils extends ScalaModule {
+    def scalaVersion = "3.8.2"
+  }
+}
+
+// Configure DocsModule to generate unified scaladoc across all modules.
+// Point docRootModule at the root build so it can discover ScalaModules.
+object docs extends DocsModule {
+  def docProjectName = "example-project"
+  def docVersion     = Task("0.1.0")
+  def docRootModule  = build
+
+  // Optionally exclude modules or add source links
+  override def excludedModules = Set.empty[String]
+  override def sourceLinks     = Seq.empty[String]
+  override def staticDocSources = Seq.empty[os.RelPath]
+}
+
+/** Usage
+
+> ./mill docs.listModules
+app
+libs.utils
+
+*/

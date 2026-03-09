@@ -1,0 +1,20 @@
+package build
+
+import mill._, scalalib._
+import atn.mill._
+
+// Mix ScalafixSupport into any ScalaModule to enable Scalafix.
+// Place a .scalafix.conf at the workspace root to configure rules.
+object example extends ScalaModule with ScalafixSupport {
+  def scalaVersion = "3.8.2"
+}
+
+/** Usage
+
+> ./mill resolve example.scalafix
+example.scalafix
+
+> ./mill resolve example.scalafixCheck
+example.scalafixCheck
+
+*/

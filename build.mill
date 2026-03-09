@@ -35,6 +35,42 @@ trait MillPluginModule extends ScalaModule with PublishModule {
     )
     def testFramework = "utest.runner.Framework"
   }
+
+  trait MillPluginExampleTests extends ScalaTests {
+    def pluginModules: Seq[PublishModule]
+    def mvnDeps       = Seq(
+      mvn"com.lihaoyi::utest:0.9.5",
+      mvn"com.lihaoyi::mill-testkit:$millVersion"
+    )
+    def testFramework = "utest.runner.Framework"
+    def pluginArtifacts: T[Seq[(mill.scalalib.publish.Artifact, os.Path, os.Path)]] = Task {
+      Task.traverse(pluginModules) { m =>
+        Task.Anon {
+          (m.artifactMetadata(), m.jar().path, m.pom().path)
+        }
+      }()
+    }
+    def localM2Repo: T[PathRef] = Task {
+      import java.nio.file.{Files, StandardCopyOption}
+      val repo = Task.dest / "m2repo"
+      for ((art, jar, pom) <- pluginArtifacts()) {
+        val base = repo / os.RelPath(art.group.replace('.', '/')) / art.id / art.version
+        os.makeDir.all(base)
+        Files.copy(jar.toNIO, (base / s"${art.id}-${art.version}.jar").toNIO, StandardCopyOption.REPLACE_EXISTING)
+        Files.copy(pom.toNIO, (base / s"${art.id}-${art.version}.pom").toNIO, StandardCopyOption.REPLACE_EXISTING)
+      }
+      PathRef(repo)
+    }
+    def forkEnv = Task {
+      val repo     = localM2Repo().path
+      val existing = Task.env.getOrElse("COURSIER_REPOSITORIES", "ivy2Local|central")
+      Map(
+        "MILL_EXECUTABLE_PATH" -> (build.moduleDir / "mill").toString,
+        "COURSIER_REPOSITORIES" -> s"${repo.toNIO.toUri.toASCIIString}|$existing",
+        "PLUGIN_VERSION" -> projectVersion.currentVersion().toString
+      )
+    }
+  }
 }
 
 object core extends MillPluginModule {
@@ -54,7 +90,10 @@ object stryker4s extends MillPluginModule {
     mvn"co.fs2::fs2-core:3.12.2"
   )
 
-  object test extends MillPluginTests
+  object test    extends MillPluginTests
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(core, stryker4s)
+  }
 }
 
 object scalafix extends MillPluginModule {
@@ -62,6 +101,10 @@ object scalafix extends MillPluginModule {
   def mvnDeps = Seq(
     mvn"com.goyeau::mill-scalafix_mill1:0.6.0"
   )
+
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(scalafix)
+  }
 }
 
 object docs extends MillPluginModule {
@@ -71,7 +114,10 @@ object docs extends MillPluginModule {
     mvn"com.lihaoyi::mill-contrib-scoverage:$millVersion"
   )
 
-  object test extends MillPluginTests
+  object test    extends MillPluginTests
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(docs)
+  }
 }
 
 object githooks extends MillPluginModule {
@@ -83,7 +129,10 @@ object githooks extends MillPluginModule {
     mvn"com.lihaoyi::mainargs:0.7.6"
   )
 
-  object test extends MillPluginTests
+  object test    extends MillPluginTests
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(core, githooks)
+  }
 }
 
 object sonar extends MillPluginModule {
@@ -94,6 +143,10 @@ object sonar extends MillPluginModule {
     mvn"ch.qos.logback:logback-classic:1.5.32",
     mvn"org.typelevel::cats-core:2.13.0"
   )
+
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(core, sonar)
+  }
 }
 
 object devx extends MillPluginModule {
@@ -103,5 +156,8 @@ object devx extends MillPluginModule {
     mvn"com.lihaoyi::upickle:4.1.0"
   )
 
-  object test extends MillPluginTests
+  object test    extends MillPluginTests
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(devx)
+  }
 }

@@ -1,0 +1,41 @@
+package build
+
+import mill._, scalalib._
+import atn.mill._
+
+object app extends ScalaModule {
+  def scalaVersion = "3.8.2"
+}
+
+// GitHooksModule manages git hooks for formatting, testing, and commit
+// validation. Configure push tasks, extra pre-commit commands, and
+// conventional commit validation.
+object git extends GitHooksModule {
+  override def defaultTask(): String = "install"
+
+  // Run all tests before push
+  override def prePushTasks = Seq("__.test")
+
+  // Run secret scanning before each commit
+  override def preCommitExtraCommands = Seq("bash scripts/scan-secrets.sh")
+
+  // Enrich commit messages with co-author emails from this domain
+  override def emailDomain = "example.com"
+
+  // Require Jira-style footer in commit messages
+  override def commitFooterPattern = Some("Refs: [A-Z]+-\\d+")
+
+  // Exclude non-application modules from commit scope validation
+  override def excludedModuleNames = Set("test", "integration", "docker")
+}
+
+/** Usage
+
+> ./mill resolve git._
+...install...
+...preCommit...
+...prepCommit...
+...validateCommit...
+...prePush...
+
+*/

@@ -1,0 +1,30 @@
+package build
+
+import mill._, scalalib._
+import atn.mill._
+
+object app extends ScalaModule {
+  def scalaVersion = "3.8.2"
+}
+
+// SonarScanner integrates SonarQube analysis into your Mill build.
+// Configure the server URL, project key, and coverage report path.
+// Run with SONAR_TOKEN set in your environment.
+object sonar extends SonarScanner {
+  override def defaultTask(): String = "sonar"
+
+  def sonarHostUrl     = "https://sonarqube.example.com"
+  def sonarProjectKey  = "example-project-key"
+  def sonarProjectName = "Example Project"
+  def projectVersion   = Task("0.1.0")
+
+  // Point to scoverage report aggregation task
+  override def coverageReportTaskPath = "scoverage.xmlReportAll"
+}
+
+/** Usage
+
+> ./mill resolve sonar._
+...sonar...
+
+*/

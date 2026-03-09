@@ -1,0 +1,8 @@
+import mill._, scalalib._
+
+object `package` extends meta.MillBuildRootModule {
+  val pluginVersion = sys.env.getOrElse("PLUGIN_VERSION", "0.1.0")
+  def mvnDeps = Seq(
+    mvn"com.adtechnacity::mill-scalafix_mill1:$pluginVersion"
+  )
+}
