@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.1] - 2026-03-10
+
+### Added
+
+- **release**: add auto-release task that infers bump from commits
+
+### Fixed
+
+- **release**: peel annotated tags to commit for log range
+- **ci**: switch to SonatypeCentralPublishModule for Maven Central
+- remove release plugin meta-build dependency for CI bootstrap
+
+### Other
+
+- document release workflow and update CI to trigger on tags
+
 ## [0.2.0] - 2026-03-09
 
 ### Added
