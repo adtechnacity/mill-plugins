@@ -29,21 +29,15 @@ jobs:
       - name: Test
         run: ./mill __.test
 
-      - name: Import GPG key
-        run: echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-
-      - name: Publish to Sonatype
+      - name: Publish to Maven Central
         run: |
-          ./mill __.publish \
-            --sonatypeCreds "$SONATYPE_USERNAME:$SONATYPE_PASSWORD" \
-            --gpgArgs --passphrase="$GPG_PASSPHRASE",--batch,--yes,-a,-b \
-            --release true
+          ./mill mill.javalib.SonatypeCentralPublishModule/publishAll \
+            --publishArtifacts __.publishArtifacts
         env:
-          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
-          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          MILL_PGP_SECRET_BASE64: ${{ secrets.MILL_PGP_SECRET_BASE64 }}
+          MILL_PGP_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          MILL_SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          MILL_SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
 
       - name: Extract release notes from CHANGELOG.md
         id: notes
