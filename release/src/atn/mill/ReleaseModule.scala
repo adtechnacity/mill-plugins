@@ -9,17 +9,15 @@ import org.eclipse.jgit.lib.Repository
 import scala.jdk.CollectionConverters.*
 
 /**
- * Changelog generation plugin for conventional commits.
+ * Changelog generation and release automation for conventional commits.
  *
- * Parses conventional commit messages since the last version tag and generates a Keep a Changelog formatted
- * CHANGELOG.md. Designed to complement Mill's built-in `VersionFileModule` which handles version bumping and tagging.
+ * Provides `patch`, `minor`, and `major` commands that automate the full release cycle:
+ *   1. Bump version file to the release version
+ *   2. Generate CHANGELOG.md from conventional commits since last tag
+ *   3. Commit version + changelog, then tag
+ *   4. Set next patch-SNAPSHOT development version and commit
  *
- * Typical release workflow:
- * {{{
- * ./mill projectVersion.setNextVersion --bump minor
- * ./mill release.changelog
- * ./mill projectVersion.tag
- * }}}
+ * Also provides standalone `changelog` and `unreleased` commands for manual use.
  */
 trait ReleaseModule extends DefaultTaskModule:
 
@@ -34,6 +32,24 @@ trait ReleaseModule extends DefaultTaskModule:
 
   /** Conventional commit type to changelog section mapping. */
   def typeMapping: Map[String, String] = ChangelogGenerator.DefaultTypeMapping
+
+  /** Perform a patch release (bump patch from last tag). */
+  def patch() = Task.Command[Unit] {
+    val result = performRelease("patch")
+    Task.log.info(result)
+  }
+
+  /** Perform a minor release (bump minor from last tag). */
+  def minor() = Task.Command[Unit] {
+    val result = performRelease("minor")
+    Task.log.info(result)
+  }
+
+  /** Perform a major release (bump major from last tag). */
+  def major() = Task.Command[Unit] {
+    val result = performRelease("major")
+    Task.log.info(result)
+  }
 
   /** Generate changelog for unreleased commits and write to CHANGELOG.md. */
   def changelog() = Task.Command[String] {
@@ -59,6 +75,55 @@ trait ReleaseModule extends DefaultTaskModule:
   }
 
   override def defaultTask(): String = "changelog"
+
+  /**
+   * Execute the full release cycle for the given bump type. Returns a summary string for logging.
+   */
+  private def performRelease(bump: String): String =
+    val repo = GitRepo.repo match
+      case mill.api.daemon.Result.Success(r) => r
+      case f: mill.api.daemon.Result.Failure =>
+        throw new RuntimeException(s"Cannot open git repository: ${f.error}")
+    val git  = new Git(repo)
+
+    // 1. Determine release version from last tag
+    val lastVersion = latestVersionTag(git)
+      .flatMap(SemVer.parse)
+      .getOrElse(SemVer(0, 0, 0))
+
+    val releaseVersion = bump match
+      case "patch" => lastVersion.bumpPatch
+      case "minor" => lastVersion.bumpMinor
+      case "major" => lastVersion.bumpMajor
+
+    // 2. Write release version
+    os.write.over(versionFile, releaseVersion.release.getBytes)
+
+    // 3. Generate changelog
+    val commits  = unreleasedCommits()
+    val date     = java.time.LocalDate.now().toString
+    val section  = ChangelogGenerator.generate(releaseVersion.release, date, commits, typeMapping)
+    val existing = Option.when(os.exists(changelogFile))(os.read(changelogFile))
+    val content  = ChangelogGenerator.updateFile(existing, section)
+    os.write.over(changelogFile, content.getBytes)
+
+    // 4. Commit and tag
+    val repoRoot         = repo.getWorkTree.toPath
+    val relVersionFile   = repoRoot.relativize(versionFile.toNIO).toString
+    val relChangelogFile = repoRoot.relativize(changelogFile.toNIO).toString
+
+    git.add().addFilepattern(relVersionFile).addFilepattern(relChangelogFile).call()
+    git.commit().setMessage(s"chore: release $tagPrefix${releaseVersion.release}").call()
+    git.tag().setName(s"$tagPrefix${releaseVersion.release}").call()
+
+    // 5. Set next development version (always next patch)
+    val nextDev = releaseVersion.bumpPatch
+    os.write.over(versionFile, nextDev.snapshot.getBytes)
+
+    git.add().addFilepattern(relVersionFile).call()
+    git.commit().setMessage(s"chore: set next development version ${nextDev.snapshot}").call()
+
+    s"Released $tagPrefix${releaseVersion.release} (${commits.size} commits), next dev version ${nextDev.snapshot}"
 
   /** Collect parsed conventional commits since the last version tag. */
   private def unreleasedCommits(): List[ConventionalCommit] =
