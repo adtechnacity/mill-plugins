@@ -9,3 +9,4 @@ target/
 *.jar
 *.log
 .DS_Store
+/.mcp.json
