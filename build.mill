@@ -2,12 +2,15 @@ package build
 
 import mill._, scalalib._, publish._
 import mill.contrib.versionfile.VersionFileModule
+import atn.mill._
 
 val millVersion = mill.util.BuildInfo.millVersion
 
 object projectVersion extends VersionFileModule {
   def moduleDir = build.moduleDir
 }
+
+object rel extends ReleaseModule
 
 trait MillPluginModule extends ScalaModule with PublishModule {
   def scalaVersion   = "3.8.2"
