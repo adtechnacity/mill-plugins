@@ -20,8 +20,8 @@ Add the plugin(s) you want to your `mill-build/build.mill`:
 
 ```scala
 def mvnDeps = Seq(
-  mvn"com.adtechnacity::mill-stryker4s_mill1:0.1.0",
-  mvn"com.adtechnacity::mill-githooks_mill1:0.1.0",
+  mvn"com.adtechnacity::mill-stryker4s::0.2.0",
+  mvn"com.adtechnacity::mill-githooks::0.2.0",
   // ... etc
 )
 ```
@@ -34,6 +34,32 @@ All plugins are in `package atn.mill`, so `import atn.mill.*` gives access to al
 ./mill __.compile    # Compile all modules
 ./mill __.test       # Run all tests
 ```
+
+## Releasing
+
+Releases are automated via the `release` plugin. Run one of:
+
+```bash
+./mill rel           # auto-detect bump type from conventional commits
+./mill rel.patch     # explicit patch release
+./mill rel.minor     # explicit minor release
+./mill rel.major     # explicit major release
+```
+
+This will:
+1. Bump the version file based on the last tag
+2. Generate CHANGELOG.md from conventional commits since the last tag
+3. Commit the version + changelog and create a git tag
+4. Set the next patch-SNAPSHOT development version and commit
+
+Then push with tags to trigger CI publishing:
+
+```bash
+git push --follow-tags
+```
+
+The auto-detect (`./mill rel`) infers the bump type from pending commits:
+breaking changes → major, `feat` → minor, everything else → patch.
 
 ## License
 
