@@ -2,6 +2,8 @@ import mill._, scalalib._
 
 object `package` extends meta.MillBuildRootModule {
   def mvnDeps = Seq(
-    mvn"com.lihaoyi::mill-contrib-versionfile:${mill.util.BuildInfo.millVersion}"
+    mvn"com.lihaoyi::mill-contrib-versionfile:${mill.util.BuildInfo.millVersion}",
+    mvn"com.adtechnacity::mill-release::0.2.1",
+    mvn"com.github.lolgab::mill-mima::0.2.1"
   )
 }

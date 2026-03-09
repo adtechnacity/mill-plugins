@@ -28,11 +28,16 @@ def mvnDeps = Seq(
 
 All plugins are in `package atn.mill`, so `import atn.mill.*` gives access to all traits.
 
+## Binary Compatibility
+
+All plugins are checked for binary compatibility using [MiMa](https://github.com/lightbend/mima) (via [mill-mima](https://github.com/lolgab/mill-mima)). This ensures that new releases do not accidentally break downstream projects that depend on a previous version.
+
 ## Building
 
 ```bash
-./mill __.compile    # Compile all modules
-./mill __.test       # Run all tests
+./mill __.compile                    # Compile all modules
+./mill __.test                       # Run all tests
+./mill __.mimaReportBinaryIssues     # Check binary compatibility
 ```
 
 ## Releasing

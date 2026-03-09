@@ -39,3 +39,6 @@ jobs:
 
       - name: Format check
         run: ./mill mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll
+
+      - name: Binary compatibility check
+        run: ./mill __.mimaReportBinaryIssues

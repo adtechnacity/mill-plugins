@@ -2,6 +2,7 @@ package build
 
 import mill._, scalalib._, publish._
 import mill.contrib.versionfile.VersionFileModule
+import com.github.lolgab.mill.mima.*
 
 val millVersion = mill.util.BuildInfo.millVersion
 
@@ -9,9 +10,10 @@ object projectVersion extends VersionFileModule {
   def moduleDir = build.moduleDir
 }
 
-trait MillPluginModule extends ScalaModule with PublishModule {
+trait MillPluginModule extends ScalaModule with PublishModule with Mima {
   def scalaVersion   = "3.8.2"
   def publishVersion = projectVersion.currentVersion().toString
+  def mimaPreviousVersions = Seq("0.2.1")
 
   def pomSettings = PomSettings(
     description = artifactName(),
