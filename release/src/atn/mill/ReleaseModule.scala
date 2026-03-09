@@ -156,7 +156,7 @@ trait ReleaseModule extends DefaultTaskModule:
         val logCmd = git.log()
         lastTag match
           case Some(tagRef) =>
-            val tagId = repo.resolve(tagRef)
+            val tagId = repo.resolve(s"$tagRef^{commit}")
             logCmd.addRange(tagId, head)
           case None         =>
             logCmd.add(head)
