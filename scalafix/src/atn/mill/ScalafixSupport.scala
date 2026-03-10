@@ -7,7 +7,7 @@ import mill.scalalib.*
 
 trait ScalafixSupport extends ScalaModule:
 
-  def scalafix(evaluator: Evaluator) = Task.Command(exclusive = true)[Unit] {
+  def scalafix() = Task.Command[Unit] {
     val sourceFiles = UpstreamScalafixModule.filesToFix(allSources())
     val semanticCp  = compiledClassesAndSemanticDbFiles().path
     val cp          = compileClasspath().map(_.path) ++ Seq(semanticCp)
@@ -29,7 +29,7 @@ trait ScalafixSupport extends ScalaModule:
       case _                 => Result.Success(())
   }
 
-  def scalafixCheck(evaluator: Evaluator) = Task.Command(exclusive = true)[Unit] {
+  def scalafixCheck() = Task.Command[Unit] {
     val sourceFiles = UpstreamScalafixModule.filesToFix(allSources())
     val semanticCp  = compiledClassesAndSemanticDbFiles().path
     val cp          = compileClasspath().map(_.path) ++ Seq(semanticCp)
