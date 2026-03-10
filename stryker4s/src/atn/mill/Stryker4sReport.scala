@@ -5,29 +5,20 @@ import mill.api.{Evaluator, PathRef, SelectMode, Task}
 import os.Path
 
 /**
- * Aggregation trait for stryker4s reports across all modules.
+ * Aggregation trait for stryker4s reports across all modules with defaultTask `runAll`
  *
  * Add to your root build as:
  * {{{
- * object stryker4s extends DefaultTaskModule with Stryker4sReport {
- *   override def defaultTask(): String = "jsonReportAll"
- * }
+ * object stryker4s extends Stryker4sReport
  * }}}
  */
-trait Stryker4sReport extends Module:
+trait Stryker4sReport extends DefaultTaskModule:
+
+  override def defaultTask(): String = "runAll"
 
   /** Run mutation testing on all discovered Stryker4sModule modules. */
-  def runAll(evaluator: Evaluator) = Task.Command(exclusive = true) {
-    resolveAndRun(evaluator, "__.strykerMutate")()
-  }
-
-  private def resolveAndRun(evaluator: Evaluator, taskSelector: String): Task[Unit] = {
-    val tasks = evaluator
-      .resolveTasks(Seq(taskSelector), SelectMode.Separated)
-      .get
-      .asInstanceOf[Seq[Task[Unit]]]
-
-    Task.Anon { Task.sequence(tasks)() }
+  def runAll(evaluator: Evaluator) = Task.Command(exclusive = true)[Unit] {
+    evaluator.evaluate(Seq("__.strykerMutate"))
   }
 
   /** Aggregate all JSON mutation reports into a single directory. */
@@ -51,20 +42,22 @@ trait Stryker4sReport extends Module:
   private def aggregateReports(evaluator: Evaluator, taskSelector: String)(
     copyReport: (PathRef, Path, String) => Unit
   ): Task[PathRef] = {
-    val namedTasks = evaluator
+    val tasks = evaluator
       .resolveTasks(Seq(taskSelector), SelectMode.Separated)
       .get
+      .asInstanceOf[List[Task.Named[PathRef]]]
 
-    val moduleNames = namedTasks.map { t =>
+    val moduleNames = tasks.map { t =>
       val full  = t.toString // e.g. "example.strykerJsonReport"
-      val label = t.asInstanceOf[Task.Named[?]].label
+      val label = t.label
       full.stripSuffix(s".$label")
     }
-    val tasks       = namedTasks.asInstanceOf[Seq[Task[PathRef]]]
 
     Task.Anon {
-      val reports = Task.sequence(tasks)()
-      reports.zip(moduleNames).foreach(copyReport(_, Task.dest, _))
+      Task
+        .sequence(tasks)()
+        .zip(moduleNames)
+        .foreach(copyReport(_, Task.dest, _))
       PathRef(Task.dest)
     }
   }
