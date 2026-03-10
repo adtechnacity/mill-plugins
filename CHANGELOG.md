@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0] - 2026-03-10
+
+### Added
+
+- add rel module for release automation
+
+### Fixed
+
+- stryker4s mutation testing and report aggregation
+- stryker4s was generating reports to the target/ folder
+
+### Changed
+
+- scalafix tasks don't need an evaluator
+- move WorkDone to githooks, improve CodeScene docs, fix stryker4s reports
+
+### Other
+
+- set next development version 0.2.3-SNAPSHOT
+
 ## [0.2.2] - 2026-03-10
 
 ### Added
