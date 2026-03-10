@@ -9,6 +9,9 @@ object example extends ScalaModule with Stryker4sModule {
   def scalaVersion   = "3.8.2"
   def strykerVersion = "0.19.1"
 
+  // Point to the test module for mutation testing
+  def strykerTestModule = test
+
   // Customise mutation testing behaviour
   override def strykerThresholds       = StrykerThresholds(high = 90, low = 70, break = 50)
   override def strykerReporters        = Seq("console", "html", "json")
@@ -26,19 +29,24 @@ object stryker4s extends DefaultTaskModule with Stryker4sReport {
 
 /** Usage
 
-> ./mill resolve example.strykerConf
-example.strykerConf
+> ./mill show example.strykerConf
+...scala-dialect...scala3future...
+...StringLiteral...
+...high...90...
 
-> ./mill resolve example.strykerMutate
-example.strykerMutate
+> ./mill example.strykerMutate
+...13 mutant(s) generated...
+...Total mutants: 13, detected: 10, undetected: 3
+Mutation testing complete...
 
-> ./mill resolve example.strykerMutateExternal
-example.strykerMutateExternal
+> find out/example/strykerMutate.dest -name report.json -exec jq -f mutation-summary.jq {} \;
+...killed...10...
+...survived...3...
 
-> ./mill resolve example.strykerJsonReport
-example.strykerJsonReport
+> ./mill show example.strykerJsonReport
+...report.json...
 
-> ./mill resolve stryker4s.jsonReportAll
-stryker4s.jsonReportAll
+> ./mill show stryker4s.jsonReportAll
+...stryker4s-reports...
 
 */

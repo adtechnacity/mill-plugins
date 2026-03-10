@@ -2,27 +2,52 @@ package atn.mill
 
 import mill.*
 import mill.scalalib.*
-import mill.api.{Evaluator, PathRef, Result, SelectMode, Task}
+import mill.api.{PathRef, Task}
 
+/**
+ * Mixin for ScalaModules to enable stryker4s mutation testing.
+ *
+ * Override [[strykerTestModule]] to point to the test module whose classpath
+ * and discovered test classes should be used for mutation testing.
+ *
+ * {{{
+ * object example extends ScalaModule with Stryker4sModule {
+ *   def scalaVersion      = "3.8.2"
+ *   def strykerVersion    = "0.19.1"
+ *   def strykerTestModule = test
+ *
+ *   object test extends ScalaTests with TestModule.Utest {
+ *     def mvnDeps = Seq(mvn"com.lihaoyi::utest:0.9.5")
+ *   }
+ * }
+ * }}}
+ */
 trait Stryker4sModule extends ScalaModule:
 
+  /** Stryker4s version to use (e.g. "0.19.1"). */
   def strykerVersion: String
 
-  def strykerMutateGlobs: Seq[String] = Seq("**/src/**/*.scala")
+  /** The test module whose classpath and test classes are used for mutation testing. */
+  def strykerTestModule: ScalaTests
 
+  /** Mutation types to exclude from testing. */
   def strykerExcludedMutations: Seq[String] = Seq.empty
 
+  /** Score thresholds for pass/warn/fail. */
   def strykerThresholds: StrykerThresholds = StrykerThresholds()
 
+  /** Report formats to generate. */
   def strykerReporters: Seq[String] = Seq("console", "html", "json")
 
+  /** Number of parallel test runners for mutation testing. */
   def strykerConcurrency: Int = StrykerModule.defaultConcurrency
 
+  /** Scala dialect for the mutator parser. */
   def strykerScalaDialect: String = "scala3future"
 
+  /** Build the stryker4s configuration map (without mutate patterns or base-dir). */
   def strykerConf = Task {
     StrykerModule.buildConf(
-      strykerMutateGlobs,
       strykerExcludedMutations,
       strykerThresholds,
       strykerReporters,
@@ -31,74 +56,15 @@ trait Stryker4sModule extends ScalaModule:
     )
   }
 
-  /** Run mutation testing using the external command runner (subprocess per mutation). */
-  def strykerMutateExternal(evaluator: Evaluator) = Task.Command(exclusive = true)[Unit] {
-    val conf         = strykerConf()
-    // Mill always runs from workspace root, so os.pwd is the workspace root
-    val workspaceDir = os.pwd
-    val confFile     = Task.dest / "stryker4s.conf"
-
-    // Determine the module path for the test command
-    val modulePath = moduleSegments.render
-    val testCmd    = s"$modulePath.test"
-
-    // Override mutate globs to target this module's sources, relative to workspace root
-    val moduleConf = conf.updated(
-      "mutate",
-      ujson.Arr(sources().map(pr => ujson.Str(pr.path.relativeTo(workspaceDir).toString + "/**/*.scala"))*)
-    )
-
-    // Create a wrapper script for the stryker4s test runner.
-    // Stryker4s copies the workspace to a temp dir and runs the test command
-    // from there. The script must:
-    // 1. Remove the copied out/mill-daemon (conflicts with the active daemon)
-    // 2. Disable scoverage — instrumentation on mutated code causes
-    //    "Method too large" JVM errors
-    // 3. Run Mill with --no-daemon and a timeout to prevent hanging tests
-    val timeoutSecs   = StrykerModule.defaultTimeout / 1000
-    val wrapperScript = workspaceDir / "stryker-test-runner.sh"
-    os.write.over(
-      wrapperScript,
-      s"""|#!/usr/bin/env bash
-          |set -e
-          |rm -rf out/mill-daemon out/mill-build
-          |export DISABLE_SCOVERAGE=1
-          |exec timeout ${timeoutSecs}s ./mill --no-daemon $testCmd
-          |""".stripMargin
-    )
-    os.perms.set(wrapperScript, "rwxr-xr-x")
-
-    // Use relative path — stryker4s runs the command from its temp copy
-    StrykerModule.writeConf(moduleConf, workspaceDir, confFile, testCmd, "./stryker-test-runner.sh")
-    Task.log.info(s"Stryker4s config written to $confFile")
-
-    val classpath    = StrykerModule.resolveStrykerClasspath(strykerVersion)
-    // Copy config to workspace root since command-runner looks for it in base-dir
-    val rootConfFile = workspaceDir / "stryker4s.conf"
-    os.copy.over(confFile, rootConfFile)
-    try
-      StrykerModule.runStryker(classpath, workspaceDir, Task.log)
-    finally
-      collectReports(workspaceDir, Task.dest)
-      os.remove(rootConfFile)
-      os.remove(wrapperScript)
-  }
-
   /** Run mutation testing on this module's sources. */
-  def strykerMutate(evaluator: Evaluator) = Task.Command(exclusive = true)[Unit] {
-    val modulePath   = moduleSegments.render
+  def strykerMutate() = Task.Command(exclusive = true)[Unit] {
     val workspaceDir = os.pwd
-    Task.log.info(s"Native stryker4s runner for $modulePath")
+    val dest         = Task.dest
+    Task.log.info(s"Stryker4s mutation testing for ${moduleSegments.render}")
 
-    // Resolve test classpath from the module's test sub-module
-    val testCp = resolveEvaluatorTask[Seq[PathRef]](evaluator, s"$modulePath.test.runClasspath")
-      .map(_.path)
-
-    // Resolve test framework name
-    val framework = resolveEvaluatorTask[String](evaluator, s"$modulePath.test.testFramework")
-
-    // Resolve discovered test class names
-    val testClasses = resolveEvaluatorTask[Seq[String]](evaluator, s"$modulePath.test.discoveredTestClasses")
+    val testCp      = strykerTestModule.runClasspath().map(_.path)
+    val framework   = strykerTestModule.testFramework()
+    val testClasses = strykerTestModule.discoveredTestClasses()
 
     // Find the mill-build compiled classes directory (contains StrykerTestRunnerMain)
     val testRunnerClassDir =
@@ -109,21 +75,31 @@ trait Stryker4sModule extends ScalaModule:
     Task.log.info(s"  Test classes: ${testClasses.mkString(", ")}")
     Task.log.info(s"  Concurrency: $strykerConcurrency")
 
-    // Compute mutate patterns from module sources, relative to workspace root
-    val mutatePatterns = sources().map(pr => pr.path.relativeTo(workspaceDir).toString + "/**/*.scala")
+    // Mirror source files into Task.dest so stryker4s base-dir points here.
+    // This way stryker4s writes reports directly to Task.dest/target/ — no post-run cleanup.
+    val moduleSources = sources().map(_.path)
+    val mutatePatterns = moduleSources.map { srcDir =>
+      val rel = srcDir.relativeTo(workspaceDir)
+      val destSrcDir = dest / rel
+      os.makeDir.all(destSrcDir)
+      os.walk(srcDir).filter(_.ext == "scala").foreach { src =>
+        val target = destSrcDir / src.relativeTo(srcDir)
+        os.makeDir.all(target / os.up)
+        os.copy.over(src, target)
+      }
+      rel.toString + "/**/*.scala"
+    }
 
-    // Write stryker4s config to JVM CWD (Mill sandbox), where FileConfigSource reads it.
-    // Mill's os.pwd differs from the JVM's actual CWD — stryker4s uses the JVM CWD.
+    // Write stryker4s config with base-dir pointing to Task.dest.
     val javaCwd    = os.Path(java.nio.file.Path.of("").toAbsolutePath)
     val conf       = strykerConf()
     val moduleConf = conf.updated("mutate", ujson.Arr(mutatePatterns.map(ujson.Str(_))*))
     val confFile   = javaCwd / "stryker4s.conf"
-    StrykerModule.writeConf(moduleConf, workspaceDir, confFile, testCommand = "", testRunnerCommand = "")
+    StrykerModule.writeConf(moduleConf, dest, confFile)
 
     given stryker4s.log.Logger = new stryker4s.log.Slf4jLogger()
 
-    // Resolve module's scalac options for compiling instrumented sources
-    val moduleScalacOpts = resolveEvaluatorTask[Seq[String]](evaluator, s"$modulePath.scalacOptions")
+    val moduleScalacOpts = scalacOptions()
     Task.log.info(s"  Scalac options: ${moduleScalacOpts.size} flags")
 
     val runner = new Stryker4sMillRunner(
@@ -134,52 +110,40 @@ trait Stryker4sModule extends ScalaModule:
       concurrency = strykerConcurrency,
       testTimeout = StrykerModule.defaultTimeout.toLong,
       scalaVersion = scalaVersion(),
-      moduleSourceDirs = sources().map(_.path),
+      moduleSourceDirs = moduleSources,
       scalacOptions = moduleScalacOpts
     )
 
     try
       import cats.effect.unsafe.implicits.global
       val result = runner.run().unsafeRunSync()
-      Task.log.info(s"Native mutation testing complete: $result")
-    finally
-      collectReports(workspaceDir, Task.dest)
-      os.remove(confFile)
+      Task.log.info(s"Mutation testing complete: $result")
+    finally os.remove(confFile)
   }
-
-  /** Resolve a single task from the evaluator and extract its value. */
-  private def resolveEvaluatorTask[T](evaluator: Evaluator, taskSelector: String): T =
-    evaluator
-      .resolveTasks(Seq(taskSelector), SelectMode.Multi)
-      .toEither
-      .fold(
-        e => throw new RuntimeException(s"Could not resolve $taskSelector: $e"),
-        tasks =>
-          evaluator
-            .execute(tasks.asInstanceOf[Seq[Task[Any]]])
-            .executionResults
-            .results
-            .head
-            .get
-            .value
-            .asInstanceOf[T]
-      )
 
   /**
    * Path to the most recent stryker4s report directory for this module.
    *
-   * During mutation runs, `<workspace>/target` is symlinked to `Task.dest` so stryker4s
-   * writes reports directly into Mill's `out/` directory.
+   * Stryker4s writes reports to the `strykerMutate` command dest under
+   * `target/stryker4s-report-<timestamp>/`.
    */
   def strykerReportDir = Task {
-    val reportDirs = os
-      .list(Task.dest)
-      .filter(p => os.isDir(p) && p.last.startsWith("stryker4s-report"))
-      .sortBy(os.mtime(_))
-      .reverse
-    reportDirs.headOption match
-      case Some(dir) => PathRef(dir)
-      case None      => PathRef(Task.dest)
+    val mutateDest = os.pwd / "out" / moduleSegments.parts / "strykerMutate.dest"
+    val reportRoot = mutateDest / "stryker4s-report"
+    Task.log.info(s"strykerReportDir: mutateDest=$mutateDest exists=${os.exists(mutateDest)}")
+    Task.log.info(s"strykerReportDir: reportRoot=$reportRoot exists=${os.exists(reportRoot)}")
+    val reportDirs =
+      if os.exists(reportRoot) then
+        os.list(reportRoot)
+          .filter(os.isDir(_))
+          .sortBy(os.mtime(_))
+          .reverse
+      else Seq.empty
+    Task.log.info(s"strykerReportDir: found ${reportDirs.size} report dirs")
+    reportDirs.headOption match {
+      case Some(reportDir) => PathRef(reportDir)
+      case None            => PathRef(mutateDest)
+    }
   }
 
   /** Path to the HTML report (if html reporter is configured). */
@@ -193,12 +157,3 @@ trait Stryker4sModule extends ScalaModule:
     val json = dir / "report.json"
     PathRef(if os.exists(json) then json else dir)
   }
-
-  /** Move stryker4s report directories from `<workspace>/target/` into dest, cleaning up if empty. */
-  private def collectReports(workspaceDir: os.Path, dest: os.Path): Unit =
-    val targetDir = workspaceDir / "target"
-    if os.exists(targetDir) then
-      os.list(targetDir)
-        .filter(p => os.isDir(p) && p.last.startsWith("stryker4s-report"))
-        .foreach(reportDir => os.move(reportDir, dest / reportDir.last))
-      if os.list(targetDir).isEmpty then os.remove(targetDir)

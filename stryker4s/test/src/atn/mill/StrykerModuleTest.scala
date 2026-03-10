@@ -26,14 +26,13 @@ object StrykerModuleTest extends TestSuite:
 
     test("buildConf - generates valid config map") {
       val conf = StrykerModule.buildConf(
-        mutateGlobs = Seq("**/src/**/*.scala"),
         excludedMutations = Seq("StringLiteral"),
         thresholds = StrykerThresholds(high = 90, low = 70, break = 50),
         reporters = Seq("console", "html"),
         concurrency = 2,
         scalaDialect = "scala3"
       )
-      assert(conf("mutate") == ujson.Arr("**/src/**/*.scala"))
+      assert(!conf.contains("mutate"))
       assert(conf("excluded-mutations") == ujson.Arr("StringLiteral"))
       assert(conf("thresholds")("high").num == 90)
       assert(conf("thresholds")("low").num == 70)
@@ -43,29 +42,20 @@ object StrykerModuleTest extends TestSuite:
       assert(conf("scala-dialect").str == "scala3")
     }
 
-    test("writeConf - writes valid HOCON-compatible JSON with test command") {
+    test("writeConf - writes valid JSON config") {
       val tmpDir   = os.temp.dir()
       val confFile = tmpDir / "stryker4s.conf"
       val conf     = StrykerModule.buildConf(
-        mutateGlobs = Seq("**/src/**/*.scala"),
         excludedMutations = Seq.empty,
         thresholds = StrykerThresholds(),
         reporters = Seq("console", "html"),
         concurrency = 2,
         scalaDialect = "scala3"
       )
-      StrykerModule.writeConf(conf, tmpDir, confFile, "libs.kafka_access.test")
+      StrykerModule.writeConf(conf, tmpDir, confFile)
 
       val content = ujson.read(os.read(confFile))
       assert(content("stryker4s")("base-dir").str == tmpDir.toString)
-      assert(content("stryker4s")("test-runner")("command").str == "./mill")
-      assert(content("stryker4s")("test-runner")("args").str == "libs.kafka_access.test")
-    }
-
-    test("resolveStrykerClasspath - resolves command-runner JARs") {
-      val cp = StrykerModule.resolveStrykerClasspath("0.19.1")
-      assert(cp.nonEmpty)
-      assert(cp.exists(_.last.contains("stryker4s")))
     }
 
     test("filterScalacOptions - removes fatal warnings and unused") {
@@ -91,4 +81,7 @@ object StrykerModuleTest extends TestSuite:
 object TestStrykerBuild extends TestRootModule with Stryker4sModule:
   def scalaVersion                = "3.8.2"
   def strykerVersion              = "0.19.1"
+  def strykerTestModule           = test
+  object test extends ScalaTests with TestModule.Utest:
+    override def mvnDeps = Seq.empty
   lazy val millDiscover: Discover = Discover[this.type]
