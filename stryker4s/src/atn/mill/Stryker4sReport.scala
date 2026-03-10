@@ -1,7 +1,8 @@
 package atn.mill
 
 import mill.*
-import mill.api.{DefaultTaskModule, Evaluator, PathRef, SelectMode, Task}
+import mill.api.{Evaluator, PathRef, SelectMode, Task}
+import os.Path
 
 /**
  * Aggregation trait for stryker4s reports across all modules.
@@ -17,53 +18,39 @@ trait Stryker4sReport extends Module:
 
   /** Aggregate all JSON mutation reports into a single directory. */
   def jsonReportAll(evaluator: Evaluator) = Task.Command(exclusive = true) {
-    val reports = evaluator
-      .resolveTasks(Seq("__.strykerJsonReport"), SelectMode.Multi)
-      .toEither
-      .fold(
-        e => throw new InternalError(s"Could not resolve strykerJsonReport: $e"),
-        tasks =>
-          evaluator
-            .execute(tasks.asInstanceOf[Seq[Task[Any]]])
-            .executionResults
-            .results
-            .map(_.get.value.asInstanceOf[PathRef])
-      )
-
-    val dest = Task.dest / "stryker4s-reports"
-    os.makeDir.all(dest)
-    reports.foreach { ref =>
+    aggregateReports(evaluator, "__.strykerJsonReport") { (ref, dest, moduleName) =>
       val src = ref.path
-      if os.exists(src) && os.isDir(src) then os.list(src).foreach(f => os.copy.over(f, dest / f.last))
-      else if os.exists(src) && src.ext == "json" then os.copy.over(src, dest / src.last)
-    }
-    PathRef(dest)
+      if os.exists(src) then os.copy.over(src, dest / s"$moduleName.json")
+    }()
   }
 
   /** Aggregate all HTML mutation reports into a single directory. */
   def htmlReportAll(evaluator: Evaluator) = Task.Command(exclusive = true) {
-    val reports = evaluator
-      .resolveTasks(Seq("__.strykerHtmlReport"), SelectMode.Multi)
-      .toEither
-      .fold(
-        e => throw new InternalError(s"Could not resolve strykerHtmlReport: $e"),
-        tasks =>
-          evaluator
-            .execute(tasks.asInstanceOf[Seq[Task[Any]]])
-            .executionResults
-            .results
-            .map(_.get.value.asInstanceOf[PathRef])
-      )
-
-    val dest = Task.dest / "stryker4s-reports"
-    os.makeDir.all(dest)
-    reports.foreach { ref =>
+    aggregateReports(evaluator, "__.strykerHtmlReport") { (ref, dest, moduleName) =>
       val src = ref.path
-      if os.exists(src) && os.isDir(src) then
-        val moduleName = src.segments.toSeq.reverse.dropWhile(!_.startsWith("stryker4s")).headOption.getOrElse("unknown")
-        val moduleDest = dest / moduleName
-        os.makeDir.all(moduleDest)
-        os.list(src).foreach(f => os.copy.over(f, moduleDest / f.last))
+      val moduleDest = dest / os.SubPath(moduleName.replace('.', '/'))
+      os.makeDir.all(moduleDest)
+      if os.exists(src) then os.copy(src / os.up, moduleDest, createFolders = true)
+    }()
+  }
+
+  private def aggregateReports(evaluator: Evaluator, taskSelector: String)(
+      copyReport: (PathRef, Path, String) => Unit
+  ): Task[PathRef] = {
+    val namedTasks = evaluator
+      .resolveTasks(Seq(taskSelector), SelectMode.Separated)
+      .get
+
+    val moduleNames = namedTasks.map { t =>
+      val full = t.toString // e.g. "example.strykerJsonReport"
+      val label = t.asInstanceOf[Task.Named[?]].label
+      full.stripSuffix(s".$label")
     }
-    PathRef(dest)
+    val tasks = namedTasks.asInstanceOf[Seq[Task[PathRef]]]
+
+    Task.Anon {
+      val reports = Task.sequence(tasks)()
+      reports.zip(moduleNames).foreach(copyReport(_, Task.dest, _))
+      PathRef(Task.dest)
+    }
   }

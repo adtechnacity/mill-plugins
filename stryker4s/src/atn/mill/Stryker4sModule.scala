@@ -2,7 +2,7 @@ package atn.mill
 
 import mill.*
 import mill.scalalib.*
-import mill.api.{PathRef, Task}
+import mill.api.{BuildCtx, PathRef, Task}
 
 /**
  * Mixin for ScalaModules to enable stryker4s mutation testing.
@@ -78,7 +78,7 @@ trait Stryker4sModule extends ScalaModule:
     // Mirror source files into Task.dest so stryker4s base-dir points here.
     // This way stryker4s writes reports directly to Task.dest/target/ — no post-run cleanup.
     val moduleSources = sources().map(_.path)
-    val mutatePatterns = moduleSources.map { srcDir =>
+    val mirroredSourceDirs = moduleSources.map { srcDir =>
       val rel = srcDir.relativeTo(workspaceDir)
       val destSrcDir = dest / rel
       os.makeDir.all(destSrcDir)
@@ -87,7 +87,10 @@ trait Stryker4sModule extends ScalaModule:
         os.makeDir.all(target / os.up)
         os.copy.over(src, target)
       }
-      rel.toString + "/**/*.scala"
+      destSrcDir
+    }
+    val mutatePatterns = mirroredSourceDirs.map { d =>
+      d.relativeTo(dest).toString + "/**/*.scala"
     }
 
     // Write stryker4s config with base-dir pointing to Task.dest.
@@ -110,7 +113,7 @@ trait Stryker4sModule extends ScalaModule:
       concurrency = strykerConcurrency,
       testTimeout = StrykerModule.defaultTimeout.toLong,
       scalaVersion = scalaVersion(),
-      moduleSourceDirs = moduleSources,
+      moduleSourceDirs = mirroredSourceDirs,
       scalacOptions = moduleScalacOpts
     )
 
@@ -125,35 +128,19 @@ trait Stryker4sModule extends ScalaModule:
    * Path to the most recent stryker4s report directory for this module.
    *
    * Stryker4s writes reports to the `strykerMutate` command dest under
-   * `target/stryker4s-report-<timestamp>/`.
+   * `target/stryker4s-report/<timestamp>/`.
    */
-  def strykerReportDir = Task {
-    val mutateDest = os.pwd / "out" / moduleSegments.parts / "strykerMutate.dest"
-    val reportRoot = mutateDest / "stryker4s-report"
-    Task.log.info(s"strykerReportDir: mutateDest=$mutateDest exists=${os.exists(mutateDest)}")
-    Task.log.info(s"strykerReportDir: reportRoot=$reportRoot exists=${os.exists(reportRoot)}")
-    val reportDirs =
-      if os.exists(reportRoot) then
-        os.list(reportRoot)
-          .filter(os.isDir(_))
-          .sortBy(os.mtime(_))
-          .reverse
-      else Seq.empty
-    Task.log.info(s"strykerReportDir: found ${reportDirs.size} report dirs")
-    reportDirs.headOption match {
-      case Some(reportDir) => PathRef(reportDir)
-      case None            => PathRef(mutateDest)
-    }
-  }
+  /** Path to the most recent stryker4s report directory for this module. */
+  private def latestReportDir: os.Path =
+    val reportRoot = BuildCtx.workspaceRoot / "out" / moduleSegments.parts / "strykerMutate.dest" / "target" / "stryker4s-report"
+    os.list(reportRoot).sortBy(os.mtime(_)).last
 
   /** Path to the HTML report (if html reporter is configured). */
-  def strykerHtmlReport = Task {
-    PathRef(strykerReportDir().path)
+  def strykerHtmlReport = Task.Input {
+    PathRef(latestReportDir / "index.html")
   }
 
   /** Path to the JSON report (mutation-testing-report.json). */
-  def strykerJsonReport = Task {
-    val dir  = strykerReportDir().path
-    val json = dir / "report.json"
-    PathRef(if os.exists(json) then json else dir)
+  def strykerJsonReport = Task.Input {
+    PathRef(latestReportDir / "report.json")
   }
