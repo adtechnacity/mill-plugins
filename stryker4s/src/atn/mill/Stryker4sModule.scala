@@ -127,7 +127,6 @@ trait Stryker4sModule extends ScalaModule:
    *
    * Stryker4s writes reports to the `strykerMutate` command dest under `target/stryker4s-report/<timestamp>/`.
    */
-  /** Path to the most recent stryker4s report directory for this module. */
   private def latestReportDir: os.Path =
     val reportRoot =
       BuildCtx.workspaceRoot / "out" / moduleSegments.parts / "strykerMutate.dest" / "target" / "stryker4s-report"
