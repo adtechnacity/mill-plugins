@@ -93,6 +93,10 @@ object stryker4s extends MillPluginModule {
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(core, stryker4s)
   }
+
+  override def mimaBinaryIssueFilters =
+    super.mimaBinaryIssueFilters() ++ Seq(ProblemFilter.exclude[MissingTypesProblem]("atn.mill.Stryker4sReport"))
+
 }
 
 object scalafix extends MillPluginModule {
