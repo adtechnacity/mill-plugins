@@ -16,6 +16,20 @@ import os.Path
  */
 trait Stryker4sReport extends Module:
 
+  /** Run mutation testing on all discovered Stryker4sModule modules. */
+  def runAll(evaluator: Evaluator) = Task.Command(exclusive = true) {
+    resolveAndRun(evaluator, "__.strykerMutate")()
+  }
+
+  private def resolveAndRun(evaluator: Evaluator, taskSelector: String): Task[Unit] = {
+    val tasks = evaluator
+      .resolveTasks(Seq(taskSelector), SelectMode.Separated)
+      .get
+      .asInstanceOf[Seq[Task[Unit]]]
+
+    Task.Anon { Task.sequence(tasks)() }
+  }
+
   /** Aggregate all JSON mutation reports into a single directory. */
   def jsonReportAll(evaluator: Evaluator) = Task.Command(exclusive = true) {
     aggregateReports(evaluator, "__.strykerJsonReport") { (ref, dest, moduleName) =>
