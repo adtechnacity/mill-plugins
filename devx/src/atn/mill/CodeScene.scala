@@ -5,8 +5,8 @@ import upickle.{default => json}
 /**
  * Client for the [[https://codescene.io CodeScene]] REST API (v2).
  *
- * Requires an access token via the environment variable named by [[csAccessTokenEnvVar]]
- * (defaults to `CS_ACCESS_TOKEN`).
+ * Requires an access token via the environment variable named by [[csAccessTokenEnvVar]] (defaults to
+ * `CS_ACCESS_TOKEN`).
  *
  * @groupprio Models 10
  * @groupprio DeveloperSettings 20

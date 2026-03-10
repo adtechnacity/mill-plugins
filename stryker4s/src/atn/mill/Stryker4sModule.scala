@@ -7,8 +7,8 @@ import mill.api.{BuildCtx, PathRef, Task}
 /**
  * Mixin for ScalaModules to enable stryker4s mutation testing.
  *
- * Override [[strykerTestModule]] to point to the test module whose classpath
- * and discovered test classes should be used for mutation testing.
+ * Override [[strykerTestModule]] to point to the test module whose classpath and discovered test classes should be used
+ * for mutation testing.
  *
  * {{{
  * object example extends ScalaModule with Stryker4sModule {
@@ -77,9 +77,9 @@ trait Stryker4sModule extends ScalaModule:
 
     // Mirror source files into Task.dest so stryker4s base-dir points here.
     // This way stryker4s writes reports directly to Task.dest/target/ — no post-run cleanup.
-    val moduleSources = sources().map(_.path)
+    val moduleSources      = sources().map(_.path)
     val mirroredSourceDirs = moduleSources.map { srcDir =>
-      val rel = srcDir.relativeTo(workspaceDir)
+      val rel        = srcDir.relativeTo(workspaceDir)
       val destSrcDir = dest / rel
       os.makeDir.all(destSrcDir)
       os.walk(srcDir).filter(_.ext == "scala").foreach { src =>
@@ -89,9 +89,7 @@ trait Stryker4sModule extends ScalaModule:
       }
       destSrcDir
     }
-    val mutatePatterns = mirroredSourceDirs.map { d =>
-      d.relativeTo(dest).toString + "/**/*.scala"
-    }
+    val mutatePatterns     = mirroredSourceDirs.map(d => d.relativeTo(dest).toString + "/**/*.scala")
 
     // Write stryker4s config with base-dir pointing to Task.dest.
     val javaCwd    = os.Path(java.nio.file.Path.of("").toAbsolutePath)
@@ -127,12 +125,12 @@ trait Stryker4sModule extends ScalaModule:
   /**
    * Path to the most recent stryker4s report directory for this module.
    *
-   * Stryker4s writes reports to the `strykerMutate` command dest under
-   * `target/stryker4s-report/<timestamp>/`.
+   * Stryker4s writes reports to the `strykerMutate` command dest under `target/stryker4s-report/<timestamp>/`.
    */
   /** Path to the most recent stryker4s report directory for this module. */
   private def latestReportDir: os.Path =
-    val reportRoot = BuildCtx.workspaceRoot / "out" / moduleSegments.parts / "strykerMutate.dest" / "target" / "stryker4s-report"
+    val reportRoot =
+      BuildCtx.workspaceRoot / "out" / moduleSegments.parts / "strykerMutate.dest" / "target" / "stryker4s-report"
     os.list(reportRoot).sortBy(os.mtime(_)).last
 
   /** Path to the HTML report (if html reporter is configured). */

@@ -29,12 +29,8 @@ object StrykerModule:
     )
 
   /** Write a stryker4s config file. `base-dir` is set but may be overridden by `extraConfigSources`. */
-  def writeConf(
-    conf: Map[String, ujson.Value],
-    baseDir: os.Path,
-    confFile: os.Path
-  ): Unit =
-    val inner = ujson.Obj.from(conf)
+  def writeConf(conf: Map[String, ujson.Value], baseDir: os.Path, confFile: os.Path): Unit =
+    val inner   = ujson.Obj.from(conf)
     inner("base-dir") = baseDir.toString
     val wrapper = ujson.Obj("stryker4s" -> inner)
     os.write.over(confFile, ujson.write(wrapper, indent = 2))

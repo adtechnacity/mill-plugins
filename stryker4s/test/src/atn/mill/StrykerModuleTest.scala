@@ -79,9 +79,9 @@ object StrykerModuleTest extends TestSuite:
     }
 
 object TestStrykerBuild extends TestRootModule with Stryker4sModule:
-  def scalaVersion                = "3.8.2"
-  def strykerVersion              = "0.19.1"
-  def strykerTestModule           = test
+  def scalaVersion      = "3.8.2"
+  def strykerVersion    = "0.19.1"
+  def strykerTestModule = test
   object test extends ScalaTests with TestModule.Utest:
     override def mvnDeps = Seq.empty
   lazy val millDiscover: Discover = Discover[this.type]

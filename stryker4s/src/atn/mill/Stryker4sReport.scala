@@ -27,7 +27,7 @@ trait Stryker4sReport extends Module:
   /** Aggregate all HTML mutation reports into a single directory. */
   def htmlReportAll(evaluator: Evaluator) = Task.Command(exclusive = true) {
     aggregateReports(evaluator, "__.strykerHtmlReport") { (ref, dest, moduleName) =>
-      val src = ref.path
+      val src        = ref.path
       val moduleDest = dest / os.SubPath(moduleName.replace('.', '/'))
       os.makeDir.all(moduleDest)
       if os.exists(src) then os.copy(src / os.up, moduleDest, createFolders = true)
@@ -35,18 +35,18 @@ trait Stryker4sReport extends Module:
   }
 
   private def aggregateReports(evaluator: Evaluator, taskSelector: String)(
-      copyReport: (PathRef, Path, String) => Unit
+    copyReport: (PathRef, Path, String) => Unit
   ): Task[PathRef] = {
     val namedTasks = evaluator
       .resolveTasks(Seq(taskSelector), SelectMode.Separated)
       .get
 
     val moduleNames = namedTasks.map { t =>
-      val full = t.toString // e.g. "example.strykerJsonReport"
+      val full  = t.toString // e.g. "example.strykerJsonReport"
       val label = t.asInstanceOf[Task.Named[?]].label
       full.stripSuffix(s".$label")
     }
-    val tasks = namedTasks.asInstanceOf[Seq[Task[PathRef]]]
+    val tasks       = namedTasks.asInstanceOf[Seq[Task[PathRef]]]
 
     Task.Anon {
       val reports = Task.sequence(tasks)()
