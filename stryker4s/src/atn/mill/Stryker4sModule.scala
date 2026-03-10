@@ -76,8 +76,10 @@ trait Stryker4sModule extends ScalaModule:
     // Copy config to workspace root since command-runner looks for it in base-dir
     val rootConfFile = workspaceDir / "stryker4s.conf"
     os.copy.over(confFile, rootConfFile)
-    try StrykerModule.runStryker(classpath, workspaceDir, Task.log)
+    try
+      StrykerModule.runStryker(classpath, workspaceDir, Task.log)
     finally
+      collectReports(workspaceDir, Task.dest)
       os.remove(rootConfFile)
       os.remove(wrapperScript)
   }
@@ -140,7 +142,9 @@ trait Stryker4sModule extends ScalaModule:
       import cats.effect.unsafe.implicits.global
       val result = runner.run().unsafeRunSync()
       Task.log.info(s"Native mutation testing complete: $result")
-    finally os.remove(confFile)
+    finally
+      collectReports(workspaceDir, Task.dest)
+      os.remove(confFile)
   }
 
   /** Resolve a single task from the evaluator and extract its value. */
@@ -162,29 +166,25 @@ trait Stryker4sModule extends ScalaModule:
       )
 
   /**
-   * Path to the stryker4s report directory for this module.
+   * Path to the most recent stryker4s report directory for this module.
    *
-   * Stryker4s writes reports to `target/stryker4s-report-<timestamp>/` under the base-dir. This returns the most recent
-   * report directory.
+   * During mutation runs, `<workspace>/target` is symlinked to `Task.dest` so stryker4s
+   * writes reports directly into Mill's `out/` directory.
    */
   def strykerReportDir = Task {
-    val targetDir = os.pwd / "target"
-    if (!os.exists(targetDir)) PathRef(targetDir)
-    else
-      val reportDirs = os
-        .list(targetDir)
-        .filter(p => os.isDir(p) && p.last.startsWith("stryker4s-report"))
-        .sortBy(os.mtime(_))
-        .reverse
-      reportDirs.headOption match
-        case Some(dir) => PathRef(dir)
-        case None      => PathRef(targetDir)
+    val reportDirs = os
+      .list(Task.dest)
+      .filter(p => os.isDir(p) && p.last.startsWith("stryker4s-report"))
+      .sortBy(os.mtime(_))
+      .reverse
+    reportDirs.headOption match
+      case Some(dir) => PathRef(dir)
+      case None      => PathRef(Task.dest)
   }
 
   /** Path to the HTML report (if html reporter is configured). */
   def strykerHtmlReport = Task {
-    val dir = strykerReportDir().path
-    PathRef(dir)
+    PathRef(strykerReportDir().path)
   }
 
   /** Path to the JSON report (mutation-testing-report.json). */
@@ -193,3 +193,12 @@ trait Stryker4sModule extends ScalaModule:
     val json = dir / "report.json"
     PathRef(if os.exists(json) then json else dir)
   }
+
+  /** Move stryker4s report directories from `<workspace>/target/` into dest, cleaning up if empty. */
+  private def collectReports(workspaceDir: os.Path, dest: os.Path): Unit =
+    val targetDir = workspaceDir / "target"
+    if os.exists(targetDir) then
+      os.list(targetDir)
+        .filter(p => os.isDir(p) && p.last.startsWith("stryker4s-report"))
+        .foreach(reportDir => os.move(reportDir, dest / reportDir.last))
+      if os.list(targetDir).isEmpty then os.remove(targetDir)
