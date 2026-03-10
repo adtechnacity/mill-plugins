@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.1] - 2026-03-10
+
+### Added
+
+- add runAll command to Stryker4sReport for cross-module mutation testing
+
+### Changed
+
+- remove duplicate scaladoc on latestReportDir
+- apply scalafmt formatting
+
+### Other
+
+- update MiMa baseline to v0.3.0
+- set next development version 0.3.1-SNAPSHOT
+
 ## [0.3.0] - 2026-03-10
 
 ### Added
