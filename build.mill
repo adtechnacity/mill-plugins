@@ -14,7 +14,7 @@ object projectVersion extends VersionFileModule {
 trait MillPluginModule extends ScalaModule with PublishModule with Mima {
   def scalaVersion   = "3.8.2"
   def publishVersion = projectVersion.currentVersion().toString
-  def mimaPreviousVersions = Seq("0.2.1")
+  def mimaPreviousVersions = Seq("0.3.0")
 
   def pomSettings = PomSettings(
     description = artifactName(),
