@@ -85,6 +85,7 @@ class Stryker4sMillRunner(
       // Filter scalac options: keep language/source settings, drop fatal warnings and plugin paths
       val filteredScalacOpts = scalacOptions.filterNot { opt =>
         opt == "-Xfatal-warnings" ||
+        opt == "-Yexplicit-nulls" ||
         opt.startsWith("-Xplugin") ||
         opt.startsWith("-P:") ||
         opt.contains("semanticdb") ||
