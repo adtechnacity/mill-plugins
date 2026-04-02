@@ -7,6 +7,9 @@ import mill.scalalib.*
 
 trait ScalafixSupport extends ScalaModule:
 
+  /** External Scalafix rule dependencies. Override to add community rules. */
+  def scalafixMvnDeps: T[Seq[Dep]] = Task(Seq.empty[Dep])
+
   def scalafix() = Task.Command[Unit] {
     val sourceFiles = UpstreamScalafixModule.filesToFix(allSources())
     val semanticCp  = compiledClassesAndSemanticDbFiles().path
@@ -20,7 +23,7 @@ trait ScalafixSupport extends ScalaModule:
       cp,
       scalaVersion(),
       scalacOptions(),
-      Seq.empty[Dep],
+      scalafixMvnDeps(),
       Option.when(os.exists(cfg))(cfg),
       Seq.empty[String],
       BuildCtx.workspaceRoot
@@ -42,7 +45,7 @@ trait ScalafixSupport extends ScalaModule:
       cp,
       scalaVersion(),
       scalacOptions(),
-      Seq.empty[Dep],
+      scalafixMvnDeps(),
       Option.when(os.exists(cfg))(cfg),
       Seq("--check"),
       BuildCtx.workspaceRoot

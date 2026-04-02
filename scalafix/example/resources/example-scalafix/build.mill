@@ -5,8 +5,15 @@ import atn.mill._
 
 // Mix ScalafixSupport into any ScalaModule to enable Scalafix.
 // Place a .scalafix.conf at the workspace root to configure rules.
+// Override scalafixIvyDeps to add external rule dependencies.
 object example extends ScalaModule with ScalafixSupport {
   def scalaVersion = "3.8.2"
+
+  // Example: add community Scalafix rules
+  // def scalafixMvnDeps = Seq(
+  //   mvn"org.typelevel::typelevel-scalafix:0.5.0",
+  //   mvn"com.github.xuwei-k::scalafix-rules:0.6.24"
+  // )
 }
 
 /** Usage
