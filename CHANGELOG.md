@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.3] - 2026-04-02
+
+### Fixed
+
+- **stryker4s**: filter -Yexplicit-nulls from scalacOptions during mutation
+
+### Other
+
+- set next development version 0.3.3-SNAPSHOT
+
 ## [0.3.2] - 2026-04-02
 
 ### Added
