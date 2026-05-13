@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0] - 2026-05-14
+
+### Added
+
+- **scalafix**: support in-repo rule modules via scalafixToolModules
+
+### Changed
+
+- **scalafix**: tighten ScalafixSupport API, dedupe config lookup, cover failure path
+
+### Other
+
+- **deps**: bump Mill, Scala, upickle, fs2/stryker4s, sonar-scanner, mainargs, requests
+- set next development version 0.3.4-SNAPSHOT
+
 ## [0.3.3] - 2026-04-02
 
 ### Fixed
