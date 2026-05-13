@@ -13,7 +13,6 @@ object rule extends ScalaModule {
 object app extends ScalaModule with ScalafixSupport {
   def scalaVersion        = "3.8.2"
   def scalafixToolModules = Seq(rule)
-  def scalafixMvnDeps     = Seq.empty[Dep]
 }
 
 /** Usage
@@ -29,5 +28,10 @@ app.scalafix
 app.scalafixCheck
 
 > ./mill app.scalafixCheck
+
+> printf 'object Greeting:\n  def hello(name: String): String = ???\n' > app/src/Greeting.scala
+
+> ./mill app.scalafixCheck
+error: ...A Scalafix linter error was reported...
 
 */

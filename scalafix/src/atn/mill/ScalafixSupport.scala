@@ -6,11 +6,20 @@ import mill.*
 import mill.api.{BuildCtx, Logger, Result, Task}
 import mill.scalalib.*
 import scalafix.interfaces.Scalafix
+import scalafix.interfaces.ScalafixError
 import scalafix.interfaces.ScalafixError.*
 
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
+/**
+ * Drop-in Scalafix support for a `ScalaModule` that adds two affordances on top of
+ * [[com.goyeau.mill.scalafix.ScalafixModule goyeau's ScalafixModule]]:
+ *   - [[scalafixMvnDeps]] for published rule artifacts; and
+ *   - [[scalafixToolModules]] for in-repo rule modules (no `publishLocal` round trip).
+ *
+ * Exposes the standard `scalafix` and `scalafixCheck` commands.
+ */
 trait ScalafixSupport extends ScalaModule:
 
   /**
@@ -20,20 +29,23 @@ trait ScalafixSupport extends ScalaModule:
   def scalafixMvnDeps: T[Seq[Dep]] = Task(Seq.empty[Dep])
 
   /**
-   * Local Mill modules whose JAR and runtime classpath are added to Scalafix's tool classpath. Use this to develop
-   * scalafix rules in-repo without `publishLocal`. The modules must be Scala 2.13 (scalafix loads rules via a 2.13
-   * classloader) and depend on `scalafix-core` cross-published `for3Use2_13`.
+   * Local Mill modules whose compiled JAR and full runtime classpath are appended to Scalafix's tool classpath. Use
+   * this to author and iterate on Scalafix rules directly inside the same repo, without going through `publishLocal`.
+   *
+   * The referenced modules must be Scala 2.13 because Scalafix loads rules through a 2.13 classloader regardless of the
+   * target module's Scala version; rule modules typically depend on `ch.epfl.scala::scalafix-core:<version>`.
    */
   def scalafixToolModules: Seq[ScalaModule] = Seq.empty
 
   /**
-   * Resolved tool classpath URLs derived from `scalafixToolModules`. Includes each module's own JAR plus its full
-   * runtime classpath so transitive dependencies of in-repo rules are loadable too.
+   * Resolved tool classpath entries derived from [[scalafixToolModules]]. Each module contributes its own JAR plus its
+   * full runtime classpath so that transitive dependencies of in-repo rules are loadable from the rule classloader.
    */
   def scalafixToolClasspath: T[Seq[PathRef]] = Task {
     Task.traverse(scalafixToolModules)(m => Task.Anon(Seq(m.jar()) ++ m.runClasspath()))().flatten
   }
 
+  /** Rewrite sources in place by applying the configured Scalafix rules. */
   def scalafix() = Task.Command[Unit] {
     ScalafixSupport.runScalafix(
       log = Task.log,
@@ -43,14 +55,14 @@ trait ScalafixSupport extends ScalaModule:
       scalaVersion = scalaVersion(),
       scalacOptions = scalacOptions(),
       scalafixMvnDeps = scalafixMvnDeps(),
-      scalafixToolJars = scalafixToolClasspath().map(_.path),
-      scalafixConfig =
-        Option.when(os.exists(BuildCtx.workspaceRoot / ".scalafix.conf"))(BuildCtx.workspaceRoot / ".scalafix.conf"),
+      scalafixToolClasspath = scalafixToolClasspath().map(_.path),
+      scalafixConfig = ScalafixSupport.workspaceScalafixConfig,
       args = Seq.empty,
       wd = BuildCtx.workspaceRoot
     )
   }
 
+  /** Verify sources are already Scalafix-clean (no rewrites needed). Equivalent to `scalafix --check`. */
   def scalafixCheck() = Task.Command[Unit] {
     ScalafixSupport.runScalafix(
       log = Task.log,
@@ -60,9 +72,8 @@ trait ScalafixSupport extends ScalaModule:
       scalaVersion = scalaVersion(),
       scalacOptions = scalacOptions(),
       scalafixMvnDeps = scalafixMvnDeps(),
-      scalafixToolJars = scalafixToolClasspath().map(_.path),
-      scalafixConfig =
-        Option.when(os.exists(BuildCtx.workspaceRoot / ".scalafix.conf"))(BuildCtx.workspaceRoot / ".scalafix.conf"),
+      scalafixToolClasspath = scalafixToolClasspath().map(_.path),
+      scalafixConfig = ScalafixSupport.workspaceScalafixConfig,
       args = Seq("--check"),
       wd = BuildCtx.workspaceRoot
     )
@@ -70,13 +81,19 @@ trait ScalafixSupport extends ScalaModule:
 
 object ScalafixSupport:
 
+  /** Path to `.scalafix.conf` at the workspace root, when present. */
+  private def workspaceScalafixConfig: Option[os.Path] =
+    Option.when(os.exists(BuildCtx.workspaceRoot / ".scalafix.conf"))(BuildCtx.workspaceRoot / ".scalafix.conf")
+
   /**
-   * Drives `scalafix-interfaces` directly so that both published rule deps (`scalafixMvnDeps`) and locally-compiled
-   * rule jars (`scalafixToolJars`) can populate Scalafix's tool classpath. We bypass `goyeau.ScalafixModule.fixAction`
-   * because its underlying `ScalafixCache` hardcodes `withToolClasspath(Seq.empty.asJava, …)` — there's no way to
-   * forward local URLs through the published API.
+   * Internal Scalafix driver. Calls `scalafix-interfaces` directly so that locally-compiled rule JARs (via
+   * [[ScalafixSupport.scalafixToolClasspath]]) can be added to the tool classpath alongside published rule deps
+   * ([[ScalafixSupport.scalafixMvnDeps]]).
+   *
+   * Bypasses `com.goyeau.mill.scalafix.ScalafixModule.fixAction` because the underlying `ScalafixCache` hardcodes
+   * `withToolClasspath(Seq.empty.asJava, deps, repos)` — there is no published API hook to forward local URLs.
    */
-  def runScalafix(
+  private[mill] def runScalafix(
     log: Logger,
     repositories: Seq[Repository],
     sources: Seq[os.Path],
@@ -84,7 +101,7 @@ object ScalafixSupport:
     scalaVersion: String,
     scalacOptions: Seq[String],
     scalafixMvnDeps: Seq[Dep],
-    scalafixToolJars: Seq[os.Path],
+    scalafixToolClasspath: Seq[os.Path],
     scalafixConfig: Option[os.Path],
     args: Seq[String],
     wd: os.Path
@@ -93,7 +110,7 @@ object ScalafixSupport:
     else
       val repos    = repositories.map(CoursierUtils.toApiRepository).asJava
       val deps     = scalafixMvnDeps.map(CoursierUtils.toCoordinates).asJava
-      val toolUrls = scalafixToolJars.map(_.toNIO.toUri.toURL).asJava
+      val toolUrls = scalafixToolClasspath.map(_.toNIO.toUri.toURL).asJava
 
       val scalafix  = Scalafix.fetchAndClassloadInstance(scalaVersion, repos)
       val arguments = scalafix
@@ -110,21 +127,22 @@ object ScalafixSupport:
       log.info(s"Rewriting and linting ${sources.size} Scala sources against ${arguments.rulesThatWillRun.size} rules")
       val errors = arguments.run()
       if errors.isEmpty then Result.Success(())
-      else
-        val messages = errors.map {
-          case ParseError             => "A source file failed to be parsed"
-          case CommandLineError       =>
-            arguments.validate().toScala.fold("A command-line argument was parsed incorrectly")(_.getMessage)
-          case MissingSemanticdbError =>
-            "A semantic rewrite was run on a source file that has no associated META-INF/semanticdb/.../*.semanticdb"
-          case StaleSemanticdbError   =>
-            """The source file contents on disk have changed since the last compilation with the SemanticDB compiler
-              |plugin. To resolve this error re-compile the project and re-run Scalafix""".stripMargin
-          case TestError              =>
-            "A Scalafix test error was reported. Run `scalafix` without `--check` or `--diff` to fix the error"
-          case LinterError            => "A Scalafix linter error was reported"
-          case NoFilesError           => "No files were provided to Scalafix so nothing happened"
-          case NoRulesError           => "No Scalafix rules were found. Make sure a `rules` set is defined in .scalafix.conf"
-          case _                      => "Something unexpected happened running Scalafix"
-        }
-        Result.Failure(messages.mkString("\n"))
+      else Result.Failure(errors.map(describeError(_, arguments)).mkString("\n"))
+
+  /** Human-readable description for a [[ScalafixError]] returned from `Scalafix.run`. */
+  private def describeError(error: ScalafixError, arguments: scalafix.interfaces.ScalafixArguments): String =
+    error match
+      case ParseError             => "A source file failed to be parsed"
+      case CommandLineError       =>
+        arguments.validate().toScala.fold("A command-line argument was parsed incorrectly")(_.getMessage)
+      case MissingSemanticdbError =>
+        "A semantic rewrite was run on a source file that has no associated META-INF/semanticdb/.../*.semanticdb"
+      case StaleSemanticdbError   =>
+        """The source file contents on disk have changed since the last compilation with the SemanticDB compiler
+          |plugin. To resolve this error re-compile the project and re-run Scalafix""".stripMargin
+      case TestError              =>
+        "A Scalafix test error was reported. Run `scalafix` without `--check` or `--diff` to fix the error"
+      case LinterError            => "A Scalafix linter error was reported"
+      case NoFilesError           => "No files were provided to Scalafix so nothing happened"
+      case NoRulesError           => "No Scalafix rules were found. Make sure a `rules` set is defined in .scalafix.conf"
+      case _                      => "Something unexpected happened running Scalafix"
