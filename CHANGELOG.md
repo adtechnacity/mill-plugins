@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0] - 2026-06-20
+
+### Fixed
+
+- **githooks**: make pre-push hook fail on a failing test run
+
+### Other
+
+- set next development version 0.4.1-SNAPSHOT
+
 ## [0.4.0] - 2026-05-14
 
 ### Added
