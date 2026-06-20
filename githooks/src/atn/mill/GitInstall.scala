@@ -44,6 +44,8 @@ class GitInstall(gitHooksPath: Path, logger: Logger, preCommitExtraCommands: Seq
     os.write.over(
       path,
       s"""$filePrefix
+         |# Abort the push (and skip the snapshot update) if the test run fails.
+         |set -e
          |# Run only tests affected by changes since last successful push.
          |# Falls back to all tests when no selective snapshot exists (first run).
          |SELECTIVE_JSON="out/mill-selective-execution.json"

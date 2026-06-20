@@ -73,6 +73,23 @@ object GitHooksModuleTest extends TestSuite:
       }
     }
 
+    test("writePrePushHook - aborts the push when the test run fails") {
+      // The generated hook calls selective.run/git.prePush directly; without `set -e` a
+      // failing test run is masked by the trailing selective.prepare and the push proceeds.
+      val dir    = os.temp.dir()
+      val hook   = dir / "pre-push"
+      new GitInstall(dir, mill.api.daemon.Logger.DummyLogger).writePrePushHook(hook)
+      val script = os.read(hook)
+
+      val setEIdx    = script.indexOf("set -e")
+      val runIdx     = script.indexOf("selective.run __.test")
+      val prepareIdx = script.indexOf("selective.prepare __.test")
+
+      assert(setEIdx >= 0)        // failures must abort the script
+      assert(setEIdx < runIdx)    // guard is in effect before the test run
+      assert(runIdx < prepareIdx) // snapshot update only after a passing run
+    }
+
 object PrePushFailingBuild extends TestRootModule with GitHooksModule:
   def defaultTask(): String       = "prePush"
   def test                        = Task[String](throw new Exception("intentional test failure"))
