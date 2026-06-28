@@ -9,8 +9,15 @@ object rule extends ScalaModule {
   def mvnDeps      = Seq(mvn"ch.epfl.scala::scalafix-core:0.14.6")
 }
 
-// Application module to be linted. Mix in ScalafixSupport and point at the local rule via scalafixToolModules.
+// Application modules to be linted. Mix in ScalafixSupport and point at the local rule via scalafixToolModules.
 object app extends ScalaModule with ScalafixSupport {
+  def scalaVersion        = "3.8.2"
+  def scalafixToolModules = Seq(rule)
+}
+
+// A second module sharing the same rule set: `__.scalafixCheck` lints both in one Mill JVM, exercising the cached
+// tool classloader (a fresh classloader per module would otherwise accumulate and exhaust the compressed class space).
+object app2 extends ScalaModule with ScalafixSupport {
   def scalaVersion        = "3.8.2"
   def scalafixToolModules = Seq(rule)
 }
@@ -28,6 +35,8 @@ app.scalafix
 app.scalafixCheck
 
 > ./mill app.scalafixCheck
+
+> ./mill __.scalafixCheck
 
 > printf 'object Greeting:\n  def hello(name: String): String = ???\n' > app/src/Greeting.scala
 
