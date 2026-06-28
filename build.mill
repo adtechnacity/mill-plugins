@@ -127,6 +127,11 @@ object githooks extends MillPluginModule {
     mvn"com.lihaoyi::mainargs:0.7.8"
   )
 
+  // GitInstall is an internal helper (only GitHooksModule.install constructs it); the added
+  // prePushExtraCommands param is defaulted, so the constructor change is source-compatible.
+  override def mimaBinaryIssueFilters =
+    super.mimaBinaryIssueFilters() ++ Seq(ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.GitInstall.this"))
+
   object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(core, githooks)

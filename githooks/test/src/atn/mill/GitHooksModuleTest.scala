@@ -90,6 +90,22 @@ object GitHooksModuleTest extends TestSuite:
       assert(runIdx < prepareIdx) // snapshot update only after a passing run
     }
 
+    test("writePrePushHook - injects prePushExtraCommands as gates before the test run") {
+      val dir    = os.temp.dir()
+      val hook   = dir / "pre-push"
+      new GitInstall(dir, mill.api.daemon.Logger.DummyLogger, prePushExtraCommands = Seq("./mill codeHealth"))
+        .writePrePushHook(hook)
+      val script = os.read(hook)
+
+      val setEIdx = script.indexOf("set -e")
+      val gateIdx = script.indexOf("./mill codeHealth")
+      val runIdx  = script.indexOf("selective.run __.test")
+
+      assert(gateIdx >= 0)      // the extra gate is present
+      assert(setEIdx < gateIdx) // under `set -e`, so a non-zero gate aborts the push
+      assert(gateIdx < runIdx)  // fast-fail: gate runs before the slow test run
+    }
+
 object PrePushFailingBuild extends TestRootModule with GitHooksModule:
   def defaultTask(): String       = "prePush"
   def test                        = Task[String](throw new Exception("intentional test failure"))

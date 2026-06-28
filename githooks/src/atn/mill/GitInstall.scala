@@ -8,7 +8,12 @@ import mill.api.SelectMode
 
 import scala.util.Try
 
-class GitInstall(gitHooksPath: Path, logger: Logger, preCommitExtraCommands: Seq[String] = Seq.empty) {
+class GitInstall(
+  gitHooksPath: Path,
+  logger: Logger,
+  preCommitExtraCommands: Seq[String] = Seq.empty,
+  prePushExtraCommands: Seq[String] = Seq.empty
+) {
 
   val preCommitHookPath     = gitHooksPath / "pre-commit"
   val prePushHookPath       = gitHooksPath / "pre-push"
@@ -41,12 +46,14 @@ class GitInstall(gitHooksPath: Path, logger: Logger, preCommitExtraCommands: Seq
 
   def writePrePushHook(path: Path) = {
     logger.debug("writing pre-push hook")
+    // Each gate runs on its own line; `set -e` aborts the push on the first non-zero exit.
+    val extraLines = prePushExtraCommands.map(c => s"$c\n").mkString
     os.write.over(
       path,
       s"""$filePrefix
-         |# Abort the push (and skip the snapshot update) if the test run fails.
+         |# Abort the push (and skip the snapshot update) if a gate or the test run fails.
          |set -e
-         |# Run only tests affected by changes since last successful push.
+         |$extraLines# Run only tests affected by changes since last successful push.
          |# Falls back to all tests when no selective snapshot exists (first run).
          |SELECTIVE_JSON="out/mill-selective-execution.json"
          |if [ -f "$$SELECTIVE_JSON" ]; then
