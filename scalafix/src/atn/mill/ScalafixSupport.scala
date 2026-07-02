@@ -5,10 +5,10 @@ import coursier.Repository
 import mill.*
 import mill.api.{BuildCtx, Logger, Result, Task}
 import mill.scalalib.*
-import scalafix.interfaces.Scalafix
-import scalafix.interfaces.ScalafixError
 import scalafix.interfaces.ScalafixError.*
+import scalafix.interfaces.{Scalafix, ScalafixArguments, ScalafixError}
 
+import java.util.concurrent.ConcurrentHashMap
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
@@ -86,6 +86,45 @@ object ScalafixSupport:
     Option.when(os.exists(BuildCtx.workspaceRoot / ".scalafix.conf"))(BuildCtx.workspaceRoot / ".scalafix.conf")
 
   /**
+   * Caches the Scalafix tool classloader (scalafix-cli + rule classpath) across `runScalafix` invocations within a
+   * single Mill JVM, keyed by the inputs that determine it.
+   *
+   * `Scalafix.fetchAndClassloadInstance` and `ScalafixArguments.withToolClasspath` each build a URLClassLoader that
+   * loads hundreds of scalafix/scalameta classes. Building one per module — e.g. `./mill __.scalafixCheck` over a large
+   * multi-module build — accumulates classloaders that are never released, exhausting the JVM's compressed class space
+   * (`OutOfMemoryError: Compressed class space`). The tool classloader depends only on the Scala version, repositories,
+   * rule deps, and tool classpath — all identical across modules that share a rule set — so a single instance is built
+   * once and reused.
+   *
+   * Mirrors `com.goyeau.mill.scalafix.ScalafixCache`, but threads through local tool-classpath URLs (which the upstream
+   * cache hardcodes empty), keeping in-repo `scalafixToolModules` loadable. Entries are held strongly rather than via
+   * `SoftReference`: soft references are reclaimed under heap pressure, not class-space pressure, so they would not
+   * prevent the metaspace exhaustion this cache exists to avoid. The key is value-equal, so there is one entry per
+   * distinct rule set, retained for the (short-lived) Mill JVM.
+   */
+  private val toolClasspathCache =
+    new ConcurrentHashMap[(String, Seq[Repository], Seq[Dep], Seq[os.Path]), ScalafixArguments]()
+
+  private def baseArguments(
+    scalaVersion: String,
+    repositories: Seq[Repository],
+    scalafixMvnDeps: Seq[Dep],
+    scalafixToolClasspath: Seq[os.Path]
+  ): ScalafixArguments =
+    toolClasspathCache.computeIfAbsent(
+      (scalaVersion, repositories, scalafixMvnDeps, scalafixToolClasspath),
+      _ => {
+        val repos    = repositories.map(CoursierUtils.toApiRepository).asJava
+        val deps     = scalafixMvnDeps.map(CoursierUtils.toCoordinates).asJava
+        val toolUrls = scalafixToolClasspath.map(_.toNIO.toUri.toURL).asJava
+        Scalafix
+          .fetchAndClassloadInstance(scalaVersion, repos)
+          .newArguments()
+          .withToolClasspath(toolUrls, deps, repos)
+      }
+    )
+
+  /**
    * Internal Scalafix driver. Calls `scalafix-interfaces` directly so that locally-compiled rule JARs (via
    * [[ScalafixSupport.scalafixToolClasspath]]) can be added to the tool classpath alongside published rule deps
    * ([[ScalafixSupport.scalafixMvnDeps]]).
@@ -108,13 +147,10 @@ object ScalafixSupport:
   ): Result[Unit] =
     if sources.isEmpty then Result.Success(())
     else
-      val repos    = repositories.map(CoursierUtils.toApiRepository).asJava
-      val deps     = scalafixMvnDeps.map(CoursierUtils.toCoordinates).asJava
-      val toolUrls = scalafixToolClasspath.map(_.toNIO.toUri.toURL).asJava
-
-      val scalafix  = Scalafix.fetchAndClassloadInstance(scalaVersion, repos)
-      val arguments = scalafix
-        .newArguments()
+      // The tool classloader (scalafix-cli + rules) is cached and reused; only the cheap per-module arguments below are
+      // rebuilt each call. ScalafixArguments is an immutable builder, so deriving per-module args off the shared cached
+      // instance is safe under Mill's parallel module evaluation.
+      val arguments = baseArguments(scalaVersion, repositories, scalafixMvnDeps, scalafixToolClasspath)
         .withParsedArguments(args.asJava)
         .withWorkingDirectory(wd.toNIO)
         .withConfig(scalafixConfig.map(_.toNIO).toJava)
@@ -122,7 +158,6 @@ object ScalafixSupport:
         .withScalaVersion(scalaVersion)
         .withScalacOptions(scalacOptions.asJava)
         .withPaths(sources.map(_.toNIO).asJava)
-        .withToolClasspath(toolUrls, deps, repos)
 
       log.info(s"Rewriting and linting ${sources.size} Scala sources against ${arguments.rulesThatWillRun.size} rules")
       val errors = arguments.run()

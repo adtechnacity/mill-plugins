@@ -19,6 +19,9 @@ trait GitHooksModule extends DefaultTaskModule {
   /** Extra shell commands to run in the pre-commit hook before formatting checks. */
   def preCommitExtraCommands: Seq[String] = Seq.empty
 
+  /** Extra shell commands to run in the pre-push hook before tests; any non-zero exit aborts the push. */
+  def prePushExtraCommands: Seq[String] = Seq.empty
+
   /** Email domain for co-author enrichment in commit preparation. Empty string disables. */
   def emailDomain: String = ""
 
@@ -47,7 +50,7 @@ trait GitHooksModule extends DefaultTaskModule {
   ) =
     Task.Command(exclusive = true)[WorkDone] {
       val ev = EvaluatorProxy(() => evaluator)
-      new GitInstall(ev.rootModule.moduleDir / ".git/hooks", ev.baseLogger, preCommitExtraCommands)
+      new GitInstall(ev.rootModule.moduleDir / ".git/hooks", ev.baseLogger, preCommitExtraCommands, prePushExtraCommands)
         .install(force) match {
         case scala.util.Success(result) => result
         case scala.util.Failure(e)      => Result.Failure(e.getMessage)

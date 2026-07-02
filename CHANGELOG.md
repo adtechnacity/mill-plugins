@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0] - 2026-06-28
+
+### Added
+
+- **githooks**: add prePushExtraCommands for pre-push gates
+
+### Fixed
+
+- **scalafix**: cache tool classloader to stop compressed-class-space OOM
+
+### Other
+
+- set next development version 0.5.1-SNAPSHOT
+
 ## [0.5.0] - 2026-06-20
 
 ### Fixed
