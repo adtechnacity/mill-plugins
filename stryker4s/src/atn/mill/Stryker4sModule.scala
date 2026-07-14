@@ -42,6 +42,9 @@ trait Stryker4sModule extends ScalaModule:
   /** Number of parallel test runners for mutation testing. */
   def strykerConcurrency: Int = StrykerModule.defaultConcurrency
 
+  /** JVM options for the forked long-lived testrunner processes. */
+  def strykerTestRunnerJavaOpts: Seq[String] = Seq("-Xmx4G")
+
   /** Scala dialect for the mutator parser. */
   def strykerScalaDialect: String = "scala3future"
 
@@ -65,10 +68,6 @@ trait Stryker4sModule extends ScalaModule:
     val testCp      = strykerTestModule.runClasspath().map(_.path)
     val framework   = strykerTestModule.testFramework()
     val testClasses = strykerTestModule.discoveredTestClasses()
-
-    // Find the mill-build compiled classes directory (contains StrykerTestRunnerMain)
-    val testRunnerClassDir =
-      os.Path(classOf[StrykerTestRunnerMain.type].getProtectionDomain.getCodeSource.getLocation.toURI)
 
     Task.log.info(s"  Test classpath: ${testCp.size} entries")
     Task.log.info(s"  Framework: $framework")
@@ -105,14 +104,13 @@ trait Stryker4sModule extends ScalaModule:
 
     val runner = new Stryker4sMillRunner(
       testClasspath = testCp,
-      testRunnerClassDir = testRunnerClassDir,
       frameworkName = framework,
       testClasses = testClasses,
       concurrency = strykerConcurrency,
-      testTimeout = StrykerModule.defaultTimeout.toLong,
       scalaVersion = scalaVersion(),
       moduleSourceDirs = mirroredSourceDirs,
-      scalacOptions = moduleScalacOpts
+      scalacOptions = moduleScalacOpts,
+      testRunnerJavaOpts = strykerTestRunnerJavaOpts
     )
 
     try
