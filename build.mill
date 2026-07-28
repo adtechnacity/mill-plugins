@@ -101,7 +101,7 @@ object stryker4s extends MillPluginModule {
 
 object scalafix extends MillPluginModule {
   def artifactName = "mill-scalafix_mill1"
-  def mvnDeps      = Seq(mvn"com.goyeau::mill-scalafix_mill1:0.6.0", mvn"ch.epfl.scala:scalafix-interfaces:0.14.6")
+  def mvnDeps      = Seq(mvn"com.goyeau::mill-scalafix_mill1:0.6.0", mvn"ch.epfl.scala:scalafix-interfaces:0.14.7")
 
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(scalafix)
