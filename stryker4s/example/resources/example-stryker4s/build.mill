@@ -13,8 +13,8 @@ object example extends ScalaModule with Stryker4sModule {
   def strykerTestModule = test
 
   // Customise mutation testing behaviour
-  override def strykerThresholds       = StrykerThresholds(high = 90, low = 70, break = 50)
-  override def strykerReporters        = Seq("console", "html", "json")
+  override def strykerThresholds        = StrykerThresholds(high = 90, low = 70, break = 50)
+  override def strykerReporters         = Seq("console", "html", "json")
   override def strykerExcludedMutations = Seq("StringLiteral")
 
   object test extends ScalaTests with TestModule.Utest {
@@ -27,29 +27,21 @@ object stryker4s extends DefaultTaskModule with Stryker4sReport {
   override def defaultTask(): String = "jsonReportAll"
 }
 
-/** Usage
-
-> ./mill show example.strykerConf
-...scala-dialect...scala3future...
-...StringLiteral...
-...high...90...
-
-> ./mill stryker4s.runAll
-...13 mutant(s) generated...
-...Total mutants: 13, detected: 10, undetected: 3
-Mutation testing complete...
-
-> ./mill show example.strykerJsonReport
-...out/example/strykerMutate.dest/target/stryker4s-report/.../report.json...
-
-> find out/example/strykerMutate.dest -name report.json -exec jq -f mutation-summary.jq {} \;
-...killed...10...
-...survived...3...
-
-> ./mill stryker4s.jsonReportAll
-
-> find out/stryker4s/jsonReportAll.dest -name example.json -exec jq -f mutation-summary.jq {} \;
-...killed...10...
-...survived...3...
-
-*/
+/**
+ * Usage
+ *
+ * > ./mill show example.strykerConf ...scala-dialect...scala3future... ...StringLiteral... ...high...90...
+ *
+ * > ./mill stryker4s.runAll ...13 mutant(s) generated... ...Total mutants: 13, detected: 10, undetected: 3 Mutation
+ * testing complete...
+ *
+ * > ./mill show example.strykerJsonReport ...out/example/strykerMutate.dest/target/stryker4s-report/.../report.json...
+ *
+ * > find out/example/strykerMutate.dest -name report.json -exec jq -f mutation-summary.jq {} \; ...killed...10...
+ * ...survived...3...
+ *
+ * > ./mill stryker4s.jsonReportAll
+ *
+ * > find out/stryker4s/jsonReportAll.dest -name example.json -exec jq -f mutation-summary.jq {} \; ...killed...10...
+ * ...survived...3...
+ */

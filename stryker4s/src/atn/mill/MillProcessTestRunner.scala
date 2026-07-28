@@ -162,7 +162,7 @@ object MillProcessTestRunner:
 
     Resource.make(IO.blocking {
       // The classpath is routinely too long for the OS argument limit — pass everything via a java @argfile.
-      val argFile = os.temp(allArgs.map(quoteArg).mkString(" "), prefix = "s4s-args-")
+      val argFile   = os.temp(allArgs.map(quoteArg).mkString(" "), prefix = "s4s-args-")
       log.debug(s"Starting testrunner process '$javaBin @$argFile'")
       // Server output goes to a log file, NEVER an inherited pipe: the initial run streams the whole suite's test
       // output, and a pipe with no active reader would fill up and block the server (and with it the whole run).
