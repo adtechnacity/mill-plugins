@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.0] - 2026-07-28
+
+Re-release of 0.6.1 under the correct minor version: it introduced a new
+feature (stryker4s coverage-based test selection). Identical to 0.6.1.
+
 ## [0.6.1] - 2026-07-28
 
 ### Added
