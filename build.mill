@@ -12,7 +12,7 @@ object projectVersion extends VersionFileModule {
 }
 
 trait MillPluginModule extends ScalaModule with PublishModule with Mima {
-  def scalaVersion         = "3.8.3"
+  def scalaVersion         = "3.8.4"
   def publishVersion       = projectVersion.currentVersion().toString
   def mimaPreviousVersions = Seq("0.3.0")
 
@@ -77,15 +77,15 @@ trait MillPluginModule extends ScalaModule with PublishModule with Mima {
 
 object core extends MillPluginModule {
   def artifactName = "mill-core_mill1"
-  def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3", mvn"org.eclipse.jgit:org.eclipse.jgit:7.5.0.202512021534-r")
+  def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3", mvn"org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r")
 }
 
 object stryker4s extends MillPluginModule {
   def artifactName = "mill-stryker4s_mill1"
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
-    mvn"io.stryker-mutator::stryker4s-core:0.20.3",
-    mvn"io.stryker-mutator::stryker4s-command-runner:0.20.3",
+    mvn"io.stryker-mutator::stryker4s-core:0.20.4",
+    mvn"io.stryker-mutator::stryker4s-command-runner:0.20.4",
     mvn"co.fs2::fs2-core:3.13.0"
   )
 
@@ -101,7 +101,7 @@ object stryker4s extends MillPluginModule {
 
 object scalafix extends MillPluginModule {
   def artifactName = "mill-scalafix_mill1"
-  def mvnDeps      = Seq(mvn"com.goyeau::mill-scalafix_mill1:0.6.0", mvn"ch.epfl.scala:scalafix-interfaces:0.14.6")
+  def mvnDeps      = Seq(mvn"com.goyeau::mill-scalafix_mill1:0.6.2", mvn"ch.epfl.scala:scalafix-interfaces:0.14.7")
 
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(scalafix)
@@ -123,7 +123,7 @@ object githooks extends MillPluginModule {
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
     mvn"org.kapunga::fallatol-ollama:0.3.1",
-    mvn"org.eclipse.jgit:org.eclipse.jgit:7.5.0.202512021534-r",
+    mvn"org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r",
     mvn"com.lihaoyi::mainargs:0.7.8"
   )
 
@@ -143,7 +143,7 @@ object sonar extends MillPluginModule {
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
     mvn"org.sonarsource.scanner.lib:sonar-scanner-java-library:4.1.1.1633",
-    mvn"ch.qos.logback:logback-classic:1.5.32",
+    mvn"ch.qos.logback:logback-classic:1.5.38",
     mvn"org.typelevel::cats-core:2.13.0"
   )
 

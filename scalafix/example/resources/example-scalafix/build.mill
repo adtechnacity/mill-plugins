@@ -22,25 +22,22 @@ object app2 extends ScalaModule with ScalafixSupport {
   def scalafixToolModules = Seq(rule)
 }
 
-/** Usage
-
-> ./mill rule.compile
-
-> ./mill app.compile
-
-> ./mill resolve app.scalafix
-app.scalafix
-
-> ./mill resolve app.scalafixCheck
-app.scalafixCheck
-
-> ./mill app.scalafixCheck
-
-> ./mill __.scalafixCheck
-
-> printf 'object Greeting:\n  def hello(name: String): String = ???\n' > app/src/Greeting.scala
-
-> ./mill app.scalafixCheck
-error: ...A Scalafix linter error was reported...
-
-*/
+/**
+ * Usage
+ *
+ * > ./mill rule.compile
+ *
+ * > ./mill app.compile
+ *
+ * > ./mill resolve app.scalafix app.scalafix
+ *
+ * > ./mill resolve app.scalafixCheck app.scalafixCheck
+ *
+ * > ./mill app.scalafixCheck
+ *
+ * > ./mill __.scalafixCheck
+ *
+ * > printf 'object Greeting:\n def hello(name: String): String = ???\n' > app/src/Greeting.scala
+ *
+ * > ./mill app.scalafixCheck error: ...A Scalafix linter error was reported...
+ */

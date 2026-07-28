@@ -22,15 +22,13 @@ object docs extends DocsModule {
   def docRootModule  = build
 
   // Optionally exclude modules or add source links
-  override def excludedModules = Set.empty[String]
-  override def sourceLinks     = Seq.empty[String]
+  override def excludedModules  = Set.empty[String]
+  override def sourceLinks      = Seq.empty[String]
   override def staticDocSources = Seq.empty[os.RelPath]
 }
 
-/** Usage
-
-> ./mill docs.listModules
-app
-libs.utils
-
-*/
+/**
+ * Usage
+ *
+ * > ./mill docs.listModules app libs.utils
+ */
