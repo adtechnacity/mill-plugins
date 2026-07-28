@@ -1,49 +1,48 @@
 package atn.mill
 
 import cats.data.NonEmptyList
-import cats.effect.{IO, Resource}
+import cats.effect.{Deferred, IO, Resource}
 import stryker4s.config.Config
 import stryker4s.config.source.ConfigSource
 import stryker4s.log.Logger
 import stryker4s.model.CompilerErrMsg
-import stryker4s.mutants.applymutants.ActiveMutationContext
 import stryker4s.mutants.tree.InstrumenterOptions
 import stryker4s.run.{Stryker4sRunner, TestRunner}
+import stryker4s.testrunner.api.*
+
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * Mill-native Stryker4s runner.
  *
- * Uses `InstrumenterOptions.sysContext` so mutations are activated via `-DACTIVE_MUTATION=<id>` system property in
- * forked test JVMs. This eliminates the need to spawn full Mill subprocesses per mutation.
+ * Uses `InstrumenterOptions.testRunner`, so the instrumented code reports per-test '''coverage''' through
+ * `stryker4s.coverage.coverMutant` and activates mutations in-process via `stryker4s.activeMutation` — both provided by
+ * the forked `stryker4s-sbt-testrunner` server [[MillProcessTestRunner]] talks to. Each mutant therefore runs only the
+ * tests that cover it, inside a warm long-lived JVM, instead of the whole suite in a fresh fork.
  *
  * @param testClasspath
  *   resolved test classpath (compiled production + test classes + all deps)
- * @param testRunnerClassDir
- *   directory containing compiled StrykerTestRunnerMain class
  * @param frameworkName
  *   fully-qualified test framework class name
  * @param testClasses
  *   fully-qualified test class names
  * @param concurrency
  *   number of parallel test runners
- * @param testTimeout
- *   max duration per test run in milliseconds
  */
 class Stryker4sMillRunner(
   testClasspath: Seq[os.Path],
-  testRunnerClassDir: os.Path,
   frameworkName: String,
   testClasses: Seq[String],
   concurrency: Int,
-  testTimeout: Long,
   scalaVersion: String,
   moduleSourceDirs: Seq[os.Path],
-  scalacOptions: Seq[String] = Seq.empty
+  scalacOptions: Seq[String] = Seq.empty,
+  testRunnerJavaOpts: Seq[String] = Seq.empty
 )(using logger: Logger)
     extends Stryker4sRunner:
 
   override def instrumenterOptions(using config: Config): InstrumenterOptions =
-    InstrumenterOptions.sysContext(ActiveMutationContext.sysProps)
+    InstrumenterOptions.testRunner
 
   override def resolveTestRunners(tmpDir: fs2.io.file.Path)(using
     config: Config
@@ -51,6 +50,10 @@ class Stryker4sMillRunner(
     val sourceDir = os.Path(tmpDir.toNioPath)
     val classDir  = sourceDir / "classes"
     os.makeDir.all(classDir)
+
+    // The forked server provides stryker4s.activeMutation + stryker4s.coverage for the instrumented code, and the
+    // socket protocol handler. Resolved transitively so the scalapb runtime rides along.
+    val testRunnerCp = Stryker4sMillRunner.resolveTestRunnerArtifact(scalaVersion)
 
     // Only compile source files from the module's source directories (not entire workspace).
     // Stryker4s copies the whole workspace to tmpDir, but we only need the mutated module's files.
@@ -79,8 +82,12 @@ class Stryker4sMillRunner(
         .toSeq
         .map(_.getAbsolutePath)
 
-      val compileCp        = testClasspath.map(_.toString).mkString(java.io.File.pathSeparator)
-      val compilerAndLibCp = (compilerCp ++ testClasspath.map(_.toString)).mkString(java.io.File.pathSeparator)
+      // Instrumented sources reference stryker4s.coverage.coverMutant / stryker4s.activeMutation — the testrunner
+      // artifact must be on the compile classpath too.
+      val compileCp        =
+        (testRunnerCp.map(_.toString) ++ testClasspath.map(_.toString)).mkString(java.io.File.pathSeparator)
+      val compilerAndLibCp = (compilerCp ++ testRunnerCp.map(_.toString) ++ testClasspath.map(_.toString))
+        .mkString(java.io.File.pathSeparator)
 
       // Filter scalac options: keep language/source settings, drop fatal warnings and plugin paths
       val filteredScalacOpts = scalacOptions.filterNot { opt =>
@@ -111,18 +118,81 @@ class Stryker4sMillRunner(
 
       logger.info(s"Compiled instrumented sources to $classDir")
 
+    // Mutated classes shadow the originals; the testrunner artifact precedes the test classpath.
+    val runnerClasspath = classDir +: (testRunnerCp ++ testClasspath)
+    val testGroups      = Stryker4sMillRunner.buildTestGroups(testClasspath, frameworkName, testClasses)
+
+    // Shared across runners: set once from the initial run's duration, read by every timeoutRunner.
+    val sharedTimeout = Deferred.unsafe[IO, FiniteDuration]
+
     val runners = (1 to concurrency).map { _ =>
-      Resource.pure[IO, TestRunner](
-        new MillTestRunner(
-          testClasspath = testClasspath,
-          testRunnerCp = testRunnerClassDir,
-          frameworkName = frameworkName,
-          testClasses = testClasses,
-          testTimeout = testTimeout,
-          mutatedClassDir = Some(classDir)
-        )
+      val process = MillProcessTestRunner.newProcess(
+        classpath = runnerClasspath,
+        javaOpts = testRunnerJavaOpts,
+        testGroups = testGroups,
+        workingDir = sourceDir
       )
+      TestRunner.retryRunner(TestRunner.timeoutRunner(sharedTimeout, process))
     }.toList
     Right(NonEmptyList.fromListUnsafe(runners))
 
   override def extraConfigSources: List[ConfigSource[IO]] = List.empty
+
+object Stryker4sMillRunner:
+
+  /** The stryker4s version this plugin is compiled against (used to resolve the matching testrunner artifact). */
+  private def stryker4sVersion: String =
+    Option(classOf[Stryker4sRunner].getPackage.getImplementationVersion).getOrElse("0.20.3")
+
+  /** Resolve `stryker4s-sbt-testrunner` (plain Scala 3, sbt-free) with its transitive deps via coursier. */
+  private def resolveTestRunnerArtifact(scalaVersion: String): Seq[os.Path] =
+    val scalaBinary = if scalaVersion.startsWith("3") then "3" else scalaVersion.split('.').take(2).mkString(".")
+    @annotation.nowarn("msg=deprecated")
+    val files       = coursier
+      .Fetch()
+      .addDependencies(
+        coursier.Dependency(
+          coursier.Module(
+            coursier.Organization("io.stryker-mutator"),
+            coursier.ModuleName(s"stryker4s-sbt-testrunner_$scalaBinary")
+          ),
+          stryker4sVersion
+        )
+      )
+      .run()
+      .toSeq
+    files
+      .map(f => os.Path(f.getAbsolutePath))
+      // The module's own classpath must provide the Scala stdlib — the testrunner's transitive stdlib (built against
+      // a different Scala 3 minor) would otherwise shadow it and break the instrumented compile (Predef unreadable).
+      .filterNot(p => p.last.startsWith("scala3-library") || p.last.startsWith("scala-library"))
+
+  /**
+   * Build the [[TestProcessContext]] test groups the server runs: one group for the module's framework, one
+   * [[TaskDefinition]] per discovered test class. The framework is loaded in a throwaway classloader over the test
+   * classpath purely to read its fingerprint (same fingerprint for every class, as test discovery already ran in Mill).
+   */
+  private def buildTestGroups(
+    testClasspath: Seq[os.Path],
+    frameworkName: String,
+    testClasses: Seq[String]
+  ): Seq[TestGroup] =
+    val urls = testClasspath.map(_.toNIO.toUri.toURL).toArray
+    val cl   = new java.net.URLClassLoader(urls, getClass.getClassLoader)
+    try
+      val framework   = Class
+        .forName(frameworkName, true, cl)
+        .getDeclaredConstructor()
+        .newInstance()
+        .asInstanceOf[sbt.testing.Framework]
+      val fingerprint = toApiFingerprint(framework.fingerprints().head)
+      val taskDefs    = testClasses.map { className =>
+        TaskDefinition(className, fingerprint, explicitlySpecified = false, selectors = Seq(SuiteSelector()))
+      }
+      Seq(TestGroup(frameworkName, taskDefs, Some(RunnerOptions(Seq.empty, Seq.empty))))
+    finally cl.close()
+
+  private def toApiFingerprint(fp: sbt.testing.Fingerprint): Fingerprint = fp match
+    case a: sbt.testing.AnnotatedFingerprint => AnnotatedFingerprint(a.isModule(), a.annotationName())
+    case s: sbt.testing.SubclassFingerprint  =>
+      SubclassFingerprint(s.isModule(), s.superclassName(), s.requireNoArgConstructor())

@@ -16,6 +16,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      # scala-steward runs bare `mill`, but the action's fresh-install path never
+      # adds its mill binary to PATH (only the tool-cache-hit path does, and hosted
+      # runners start with an empty tool cache). Put the repo's own wrapper on PATH;
+      # it resolves the version from .mill-version in whatever directory it runs in.
+      - name: Put Mill wrapper on PATH
+        run: |
+          install -D mill "$HOME/bin/mill"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
       - uses: scala-steward-org/scala-steward-action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
