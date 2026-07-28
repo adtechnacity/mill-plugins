@@ -94,8 +94,17 @@ object stryker4s extends MillPluginModule {
     def pluginModules = Seq(core, stryker4s)
   }
 
+  // The coverage-based runner rewrite replaced the per-mutation process runner
+  // (MillTestRunner, StrykerTestRunnerMain) with the upstream sbt-testrunner;
+  // those classes were implementation detail of the plugin, not user API.
   override def mimaBinaryIssueFilters =
-    super.mimaBinaryIssueFilters() ++ Seq(ProblemFilter.exclude[MissingTypesProblem]("atn.mill.Stryker4sReport"))
+    super.mimaBinaryIssueFilters() ++ Seq(
+      ProblemFilter.exclude[MissingTypesProblem]("atn.mill.Stryker4sReport"),
+      ProblemFilter.exclude[MissingClassProblem]("atn.mill.MillTestRunner*"),
+      ProblemFilter.exclude[MissingClassProblem]("atn.mill.StrykerTestRunnerMain*"),
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.Stryker4sMillRunner.this"),
+      ProblemFilter.exclude[Problem]("atn.mill.Stryker4sMillRunner.<init>$default$9")
+    )
 
 }
 
