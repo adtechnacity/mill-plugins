@@ -20,10 +20,12 @@ jobs:
       # adds its mill binary to PATH (only the tool-cache-hit path does, and hosted
       # runners start with an empty tool cache). Put the repo's own wrapper on PATH;
       # it resolves the version from .mill-version in whatever directory it runs in.
+      # Use a dedicated dir: the action drops its own non-executable mill into
+      # $HOME/bin (its chmod +x targets the coursier cache path, not the copy).
       - name: Put Mill wrapper on PATH
         run: |
-          install -D mill "$HOME/bin/mill"
-          echo "$HOME/bin" >> "$GITHUB_PATH"
+          install -D mill "$HOME/mill-wrapper/mill"
+          echo "$HOME/mill-wrapper" >> "$GITHUB_PATH"
 
       - uses: scala-steward-org/scala-steward-action@v2
         with:
