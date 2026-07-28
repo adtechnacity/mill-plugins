@@ -77,7 +77,7 @@ trait MillPluginModule extends ScalaModule with PublishModule with Mima {
 
 object core extends MillPluginModule {
   def artifactName = "mill-core_mill1"
-  def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3", mvn"org.eclipse.jgit:org.eclipse.jgit:7.5.0.202512021534-r")
+  def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3", mvn"org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r")
 }
 
 object stryker4s extends MillPluginModule {
@@ -123,7 +123,7 @@ object githooks extends MillPluginModule {
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
     mvn"org.kapunga::fallatol-ollama:0.3.1",
-    mvn"org.eclipse.jgit:org.eclipse.jgit:7.5.0.202512021534-r",
+    mvn"org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r",
     mvn"com.lihaoyi::mainargs:0.7.8"
   )
 
