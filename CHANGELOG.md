@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.1] - 2026-07-28
+
+### Added
+
+- **stryker4s**: coverage-based test selection via the upstream sbt-testrunner
+
+### Fixed
+
+- **ci**: accept intentional MiMa breaks from the stryker4s runner rewrite
+- **ci**: keep Mill wrapper out of the dir scala-steward-action clobbers
+- **ci**: put Mill wrapper on PATH so scala-steward can run mill
+- **scalafix**: cache tool classloader to stop compressed-class-space OOM (#1)
+
+### Other
+
+- dispatch CI on Scala Steward update branches
+- set next development version 0.6.1-SNAPSHOT
+
 ## [0.6.0] - 2026-06-28
 
 ### Added
