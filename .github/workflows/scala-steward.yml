@@ -11,6 +11,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write  # dispatch CI on the update branch
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,3 +33,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           author-email: 41898282+github-actions[bot]@users.noreply.github.com
           author-name: github-actions[bot]
+
+      # GITHUB_TOKEN pushes never fire event-based workflows, so steward's PR
+      # would sit with no checks. Dispatching via the API is allowed, and the
+      # resulting check runs attach to the branch head SHA shown on the PR.
+      - name: Trigger CI on the update branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git ls-remote --exit-code origin refs/heads/update/all >/dev/null 2>&1; then
+            gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref update/all
+          fi
