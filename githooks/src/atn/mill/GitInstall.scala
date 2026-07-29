@@ -12,8 +12,12 @@ class GitInstall(
   gitHooksPath: Path,
   logger: Logger,
   preCommitExtraCommands: Seq[String] = Seq.empty,
-  prePushExtraCommands: Seq[String] = Seq.empty
+  prePushExtraCommands: Seq[String] = Seq.empty,
+  selectiveSnapshotTasks: Seq[String] = Seq("__.test"),
+  selectivePreCommitTasks: Seq[String] = Seq.empty
 ) {
+
+  val selectiveJson = "out/mill-selective-execution.json"
 
   val preCommitHookPath     = gitHooksPath / "pre-commit"
   val prePushHookPath       = gitHooksPath / "pre-push"
@@ -30,14 +34,34 @@ class GitInstall(
     if (isWindows) ".\\mill.bat"
     else "./mill"
 
+  /**
+   * Run `selectors` selectively against the snapshot, falling back to a full run (tasks joined with `+`) when no
+   * snapshot exists yet. Mirrors the pre-push test gate so format/scalafix only re-check what changed since the last
+   * `selective.prepare`.
+   */
+  def selectiveOrFull(selectors: Seq[String]): String =
+    s"""SELECTIVE_JSON="$selectiveJson"
+       |if [ -f "$$SELECTIVE_JSON" ]; then
+       |  $cmd selective.run ${selectors.mkString(" ")}
+       |else
+       |  $cmd ${selectors.mkString(" + ")}
+       |fi""".stripMargin
+
   def writePreCommitHook(path: Path) = {
     logger.debug("writing pre-commit hook")
-    val extraLines = preCommitExtraCommands.map(c => s"$c && \\\n").mkString
+    val extraLines   = preCommitExtraCommands.map(c => s"$c\n").mkString
+    // mill-build sources are tiny and outside the selective graph, so always format-check them in full.
+    val metaFormat   = s"$cmd --meta-level 1 mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll"
+    val projectCheck =
+      if (selectivePreCommitTasks.isEmpty) s"$cmd git.preCommit"
+      else selectiveOrFull(selectivePreCommitTasks)
     os.write.over(
       path,
       s"""$filePrefix
-         |$extraLines$cmd --meta-level 1 mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll && \\
-         |$cmd git.preCommit
+         |# Abort the commit if a gate or a check fails.
+         |set -e
+         |$extraLines$metaFormat
+         |$projectCheck
          |""".stripMargin,
       perms
     )
@@ -55,14 +79,15 @@ class GitInstall(
          |set -e
          |$extraLines# Run only tests affected by changes since last successful push.
          |# Falls back to all tests when no selective snapshot exists (first run).
-         |SELECTIVE_JSON="out/mill-selective-execution.json"
+         |SELECTIVE_JSON="$selectiveJson"
          |if [ -f "$$SELECTIVE_JSON" ]; then
          |  $cmd selective.run __.test
          |else
          |  $cmd git.prePush
          |fi
-         |# Update selective snapshot so the next push only re-tests what changed.
-         |$cmd selective.prepare __.test
+         |# Update the selective snapshot so the next push (and pre-commit) only re-check what changed.
+         |# Snapshot a superset of every selector run via selective.run, since absent inputs count as changed.
+         |$cmd selective.prepare ${selectiveSnapshotTasks.mkString(" ")}
          |""".stripMargin,
       perms
     )

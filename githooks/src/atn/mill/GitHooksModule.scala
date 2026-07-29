@@ -22,6 +22,20 @@ trait GitHooksModule extends DefaultTaskModule {
   /** Extra shell commands to run in the pre-push hook before tests; any non-zero exit aborts the push. */
   def prePushExtraCommands: Seq[String] = Seq.empty
 
+  /**
+   * Task selectors captured by `selective.prepare` in the pre-push snapshot. Must be a superset of every selector run
+   * via `selective.run` in any hook (test gate, [[selectivePreCommitTasks]]), because `selective.run` treats inputs
+   * absent from the snapshot as changed — a too-narrow snapshot makes selective checks run on every module.
+   */
+  def selectiveSnapshotTasks: Seq[String] = Seq("__.test")
+
+  /**
+   * Selectors run selectively in the pre-commit hook (with a full `+`-joined fallback when no snapshot exists). Empty
+   * (default) keeps the legacy full `git.preCommit` format check. Whatever is set here must be covered by
+   * [[selectiveSnapshotTasks]].
+   */
+  def selectivePreCommitTasks: Seq[String] = Seq.empty
+
   /** Email domain for co-author enrichment in commit preparation. Empty string disables. */
   def emailDomain: String = ""
 
@@ -50,7 +64,14 @@ trait GitHooksModule extends DefaultTaskModule {
   ) =
     Task.Command(exclusive = true)[WorkDone] {
       val ev = EvaluatorProxy(() => evaluator)
-      new GitInstall(ev.rootModule.moduleDir / ".git/hooks", ev.baseLogger, preCommitExtraCommands, prePushExtraCommands)
+      new GitInstall(
+        ev.rootModule.moduleDir / ".git/hooks",
+        ev.baseLogger,
+        preCommitExtraCommands,
+        prePushExtraCommands,
+        selectiveSnapshotTasks,
+        selectivePreCommitTasks
+      )
         .install(force) match {
         case scala.util.Success(result) => result
         case scala.util.Failure(e)      => Result.Failure(e.getMessage)

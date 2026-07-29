@@ -106,6 +106,49 @@ object GitHooksModuleTest extends TestSuite:
       assert(gateIdx < runIdx)  // fast-fail: gate runs before the slow test run
     }
 
+    test("writePrePushHook - snapshot covers the configured selectiveSnapshotTasks") {
+      // The snapshot must be a superset of every selective.run selector; a too-narrow snapshot makes
+      // pre-commit's selective format/scalafix run on every module (absent inputs count as changed).
+      val dir    = os.temp.dir()
+      val hook   = dir / "pre-push"
+      new GitInstall(
+        dir,
+        mill.api.daemon.Logger.DummyLogger,
+        selectiveSnapshotTasks = Seq("__.test", "__.checkFormat", "__.scalafixCheck")
+      ).writePrePushHook(hook)
+      val script = os.read(hook)
+
+      // space-separated varargs to selective.prepare (NOT `+`, which would run them as separate tasks)
+      assert(script.contains("selective.prepare __.test __.checkFormat __.scalafixCheck"))
+    }
+
+    test("writePreCommitHook - selective with full fallback when selectivePreCommitTasks set") {
+      val dir    = os.temp.dir()
+      val hook   = dir / "pre-commit"
+      new GitInstall(
+        dir,
+        mill.api.daemon.Logger.DummyLogger,
+        selectivePreCommitTasks = Seq("__.checkFormat", "__.scalafixCheck")
+      ).writePreCommitHook(hook)
+      val script = os.read(hook)
+
+      assert(script.contains("set -e"))
+      assert(script.contains("if [ -f \"$SELECTIVE_JSON\" ]; then"))
+      assert(script.contains("selective.run __.checkFormat __.scalafixCheck")) // snapshot present
+      assert(script.contains("__.checkFormat + __.scalafixCheck"))             // first-run fallback
+      assert(!script.contains("git.preCommit"))                                // replaced, not appended
+    }
+
+    test("writePreCommitHook - keeps legacy git.preCommit when selectivePreCommitTasks empty") {
+      val dir    = os.temp.dir()
+      val hook   = dir / "pre-commit"
+      new GitInstall(dir, mill.api.daemon.Logger.DummyLogger).writePreCommitHook(hook)
+      val script = os.read(hook)
+
+      assert(script.contains("git.preCommit"))
+      assert(!script.contains("selective.run")) // no selective block in the legacy path
+    }
+
 object PrePushFailingBuild extends TestRootModule with GitHooksModule:
   def defaultTask(): String       = "prePush"
   def test                        = Task[String](throw new Exception("intentional test failure"))
