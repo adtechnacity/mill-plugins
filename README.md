@@ -13,6 +13,7 @@ Custom [Mill](https://mill-build.org/) build plugins for Scala projects.
 | sonar | `mill-sonar_mill1` | SonarQube scanner integration | [example](sonar/example/resources/example-sonar/build.mill) |
 | devx | `mill-devx_mill1` | Developer experience (CodeScene, Port.io) | [example](devx/example/resources/example-devx/build.mill) |
 | release | `mill-release_mill1` | Changelog generation and release management | [example](release/example/resources/example-release/build.mill) |
+| pulumi | `mill-pulumi_mill1` | Pulumi infrastructure as Scala code, via the Automation API | [example](pulumi/example/resources/example-pulumi/build.mill) |
 
 ## Usage
 
