@@ -171,6 +171,19 @@ object release extends MillPluginModule {
   }
 }
 
+object pulumi extends MillPluginModule {
+  def artifactName = "mill-pulumi_mill1"
+  def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.13.2")
+
+  // New module: no previously released artifact to check against.
+  override def mimaPreviousArtifacts = Task(Seq.empty[Dep])
+
+  object test    extends MillPluginTests
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(pulumi)
+  }
+}
+
 object rel extends ReleaseModule
 
 object devx extends MillPluginModule {
