@@ -26,7 +26,7 @@ object pulumi extends PulumiModule {
   // the engine loads the plugin from that same source at runtime. Relative
   // paths resolve against the workspace root.
   //
-  //   override def pulumiLocalPackages = Map("iac-components" -> "../iac-components")
+  //   override def pulumiLocalPackages = Map("acme-plugin-dep" -> "../acme-plugin-dep")
   //
   // Providers the generated SDK refers to are ordinary dependencies:
   //
