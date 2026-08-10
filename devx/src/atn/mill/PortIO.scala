@@ -23,7 +23,7 @@ object PortIO {
     properties: ujson.Obj = ujson.Obj(),
     relations: ujson.Obj = ujson.Obj()
   )
-  object Entity        {
+  object Entity {
     implicit val rw: json.ReadWriter[Entity] = json.macroRW
   }
 
