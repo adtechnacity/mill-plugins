@@ -173,7 +173,7 @@ object release extends MillPluginModule {
 
 object pulumi extends MillPluginModule {
   def artifactName = "mill-pulumi_mill1"
-  def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.13.2")
+  def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.35.0")
 
   // First released in 0.8.0, so that is the baseline rather than the repo-wide 0.3.0.
   override def mimaPreviousVersions = Seq("0.8.0")
