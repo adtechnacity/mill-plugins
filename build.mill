@@ -138,8 +138,16 @@ object githooks extends MillPluginModule {
 
   // GitInstall is an internal helper (only GitHooksModule.install constructs it); the added
   // prePushExtraCommands param is defaulted, so the constructor change is source-compatible.
+  // GitDiff and its records are internal diff plumbing shared with the planned TSA feature;
+  // excluded from MiMa until both consumers have landed and the surface is reviewed.
   override def mimaBinaryIssueFilters =
-    super.mimaBinaryIssueFilters() ++ Seq(ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.GitInstall.this"))
+    super.mimaBinaryIssueFilters() ++ Seq(
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.GitInstall.this"),
+      ProblemFilter.exclude[Problem]("atn.mill.GitDiff*"),
+      ProblemFilter.exclude[Problem]("atn.mill.DiffLine*"),
+      ProblemFilter.exclude[Problem]("atn.mill.ParentLeg*"),
+      ProblemFilter.exclude[Problem]("atn.mill.ChangedFile*")
+    )
 
   object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
