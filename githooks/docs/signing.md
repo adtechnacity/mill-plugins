@@ -133,3 +133,77 @@ the local pre-commit intent check — a hook can't know the future signature's f
 rejected at verification time with a message naming the limitation. JGit has an SSH
 verification path that isn't wired up here; this is a deliberate deferral, not an oversight,
 and may be revisited if the adopter population proves SSH-dominant.
+
+## CI / remote gate
+
+Local hooks are feedback, not security — `--no-verify` bypasses them, and nothing stops a
+contributor from cloning without ever installing them. The actual enforcement layer is a
+required CI check (this section) or, eventually, a server-side pre-receive hook. A reference
+implementation ships at
+[`githooks/docs/workflows/verify-signing.yml`](workflows/verify-signing.yml); copy it into
+`.github/workflows/` to adopt it.
+
+### What it does, and why
+
+The workflow runs `./mill git.verifyRange <base-sha> <head-sha>` in **strict** mode (no
+`--lenient`) against every commit in a pull request. The one property everything else in the
+file exists to protect: **it always executes code checked out from its own ref** — the
+default branch for a normal `pull_request` trigger — never from the PR being judged. The PR
+itself is pulled in only as raw git history (a plain `git fetch` of its head ref, no working
+tree checkout) so `verifyRange` has commits to walk. This means a PR cannot smuggle in a
+weakened `signingConditions` override, a modified verifier, or a mutated trust store and have
+those changes judge themselves — `build.mill`, the trust store, and the workflow file itself
+are all read from the trusted checkout, including for a PR that edits any of them.
+
+Base and head SHAs come strictly from `github.event.pull_request.{base,head}.sha` (or, for
+the bot-PR path below, from a server-side API lookup) — never from anything a PR or its
+author could otherwise influence. An empty, equal, or unresolvable range fails the job closed
+rather than silently passing.
+
+### Bot PRs (`workflow_dispatch`)
+
+PRs authored with `GITHUB_TOKEN` — this repo's own Scala Steward workflow is one — never fire
+`pull_request` events, so a required `verify-signing` check would simply never run and such
+PRs would become permanently unmergeable. The reference workflow adds a `workflow_dispatch`
+input taking a PR number; the actual base/head SHAs are then resolved via the GitHub API
+*inside the trusted workflow*, not accepted from the dispatch caller, keeping the
+trusted-SHA-only invariant intact for this entry point too. Wiring the dispatch call itself
+(e.g. from the Steward workflow, mirroring how `scala-steward.yml` already dispatches
+`ci.yml`) is part of adopting this workflow, not something the reference file does on its
+own.
+
+### Required branch protection (repo Settings, not YAML)
+
+The workflow file cannot enforce any of this by itself — it has to be configured separately
+wherever it's adopted:
+
+- The check must be marked **required**, with "require branches to be up to date". GitHub's
+  "update branch" button offers a rebase option that destroys trusted signatures on the
+  updated commits — use "update by merge" instead.
+- Direct pushes and force-pushes to the protected branch must be blocked.
+- **Squash-merge and rebase-merge must be disabled**, leaving only "create a merge commit".
+  Both alternatives synthesize a brand-new commit at merge time that is never verified by
+  anything; a real merge commit preserves the verified PR-head commits as-is, and the merge
+  commit itself is exempt from re-triggering conditions via the combined-diff contract (an
+  empty combined diff has nothing left to sign).
+- CODEOWNERS review required on `.mill-signing/`, `build.mill`, and `.github/workflows/` — a
+  PR that edits `verify-signing.yml` itself could otherwise green its own weakened check.
+  CODEOWNERS only adds a review gate, though; where available, GitHub repository rulesets
+  with "require workflows to pass, pinned to a ref" is the stronger fix, since it stops the
+  edited workflow from running at all rather than just flagging it for review.
+
+### Release-flow interaction
+
+A repo whose release automation pushes directly to the protected branch (this repo's `rel`
+module does exactly that) bypasses the PR-based check entirely by construction. Adopting this
+workflow means either moving releases through a PR, or documenting a scoped, governed
+exemption for the release path — not leaving the gap unaddressed.
+
+### Adoption is a separate decision
+
+Everything above describes the *reference* artifact. Turning it on for `mill-plugins`
+itself — populating the trust store, marking the check required, restricting merge
+strategies, migrating Scala Steward off bare `GITHUB_TOKEN` (or wiring the `workflow_dispatch`
+entry point), and resolving the release-flow interaction — is a maintainer decision to make
+separately, after weighing the operational cost against the threat model. This unit ships the
+capability; it does not flip it on.
