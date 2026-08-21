@@ -207,3 +207,69 @@ strategies, migrating Scala Steward off bare `GITHUB_TOKEN` (or wiring the `work
 entry point), and resolving the release-flow interaction — is a maintainer decision to make
 separately, after weighing the operational cost against the threat model. This unit ships the
 capability; it does not flip it on.
+
+## Server-side enforcement (pre-receive)
+
+CI is a required check that a fork or a misconfigured client can simply never trigger. For
+self-hosted servers (GitHub Enterprise Server, GitLab self-managed, Gitea, or a bare-repo
+setup), a `pre-receive` hook runs the same verification engine directly against every push,
+with no dependence on CI having run at all.
+
+### What runs
+
+`VerifyMain` is a thin CLI over the same `GitDiff` / `SigningConditions` / `SigningVerify` /
+`TrustedKeys` engine everything else in this document uses — deliberately built with zero
+`mill.*` imports, so the published JAR runs standalone with **no Mill API on the classpath**.
+Deploy it as the repo's `pre-receive` hook via:
+
+```bash
+cs launch com.adtechnacity:mill-githooks_mill1_3:<version> --main-class atn.mill.VerifyMain
+```
+
+Note the single colon before the version — the published artifact's id already carries the
+Scala 3 suffix (`mill-githooks_mill1_3`); `::` would try (and fail) to resolve a nonexistent
+Scala 2.13 artifact.
+
+### Deployment posture
+
+- **Version-pin, and pre-seed the coursier cache at install time.** A `pre-receive` hook that
+  resolves its own classpath from the network on every push is both slow and a fragile trust
+  boundary — pin an exact version and warm the local coursier cache once, out of band, rather
+  than resolving live on each push.
+- **Fail closed.** The wrapper script invoking `cs launch` must treat a launch or resolution
+  failure as a rejected push, never as a silent pass — a coursier hiccup must not be
+  indistinguishable from "nothing to verify."
+- **Network-restricted platforms need a vendored classpath.** GitHub Enterprise Server's
+  `pre-receive` execution environment is deliberately network-isolated, so a live coursier
+  resolve won't work there at all; GitLab server hooks and Gitea custom hooks have their own
+  execution models with similar constraints. The pattern is the same everywhere — resolve the
+  classpath once, ship it alongside the hook, and launch against that local classpath instead
+  of reaching out per push — but the exact packaging mechanics are per-platform; consult each
+  platform's custom/server-hook documentation for the specifics.
+
+### Bootstrap ordering still applies
+
+The same hard prerequisite from **Enablement** above holds here too: the first trusted key
+must land on the trust root *before* this hook is installed, or via a direct admin
+server-side ref update. An empty or missing trust root is only a configuration error for
+pushes that actually contain protected commits — a repo that hasn't adopted signing at all
+(no keys ever committed) is completely unaffected by this hook being installed repo-wide on a
+shared server.
+
+### `trustedKeysDir` overrides do not reach the server
+
+`VerifyMain` always reads trusted keys from `--trust-root-ref`'s tree at a fixed path
+(default `.mill-signing/trusted-keys`, overridable via `--trusted-keys-path`) — it cannot run
+`build.mill`, so a repo's `trustedKeysDir` `def` override is invisible to it. If a repo
+relocates its keys directory, the server-side default (or its mirrored `--trusted-keys-path`
+override) must be kept in sync manually. A path that doesn't exist in the trust-root tree is a
+fail-closed configuration error — never a silent fallback to some other directory.
+
+### Built-ins-only fidelity
+
+A `pre-receive` hook cannot evaluate the pushing repo's `build.mill`, so `VerifyMain` enforces
+the three built-in conditions (`ExceptionComments`, `TestProtection`, `ProtectedPaths`) with
+**default configuration only**. A repo relying on custom `signingConditions` overrides gets
+full fidelity from CI's `verifyRange`, not from the server gate — this divergence is
+deliberate, not an oversight: CI is the full-fidelity required check, and the server hook is
+the layer that closes CI's own bypass gap.
