@@ -16,7 +16,26 @@ import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 /** The outcome of checking one commit's OpenPGP signature against a [[TrustedKeys]] allowlist. */
-sealed trait SigningVerdict
+sealed trait SigningVerdict {
+
+  /**
+   * The rejection line for a commit that triggered `reasons` but did not produce a trusted signature: `None` when the
+   * commit passes, otherwise a message naming the short `sha` and the specific remedy. Shared by every enforcement
+   * layer (pre-push, CI, pre-receive) so a contributor sees the same wording wherever the rejection surfaces.
+   */
+  def rejection(sha: String, reasons: Vector[SigningReason]): Option[String] = this match {
+    case SigningVerdict.Trusted(_)        => None
+    case SigningVerdict.Unsigned          =>
+      Some(s"$sha: unsigned but signing is required (${reasons.map(_.condition).distinct.mkString(", ")})")
+    case SigningVerdict.Unverifiable(fmt) =>
+      Some(s"$sha: signature format '$fmt' is not verifiable (only OpenPGP signatures can be verified)")
+    case SigningVerdict.Invalid(reason)   => Some(s"$sha: invalid signature ($reason)")
+    case SigningVerdict.Untrusted(fp)     =>
+      Some(s"$sha: signed by an untrusted key ($fp) — a maintainer must re-sign or add this key to the trust root")
+    case SigningVerdict.Revoked(fp)       => Some(s"$sha: signed by a revoked key ($fp)")
+    case SigningVerdict.Expired(fp)       => Some(s"$sha: signed by a key expired at signing time ($fp)")
+  }
+}
 
 object SigningVerdict {
   case object Unsigned                            extends SigningVerdict
@@ -36,16 +55,13 @@ final private case class LoadedKey(publicKey: PGPPublicKey, fingerprint: String,
 
 /**
  * Armored public keys loaded from a worktree directory or a git ref's tree, indexed by OpenPGP key ID for signature
- * lookup. Keys carrying a valid embedded revocation are retained (so a signature from one classifies as
- * [[SigningVerdict.Revoked]] rather than [[SigningVerdict.Untrusted]]) but excluded from [[trustedFingerprints]]. Known
- * shared-platform signing keys (e.g. a forge's web-flow key) are refused at load time unless explicitly allowed —
- * trusting them would collapse attribution to "has push access".
+ * lookup. Keys carrying a valid embedded revocation are retained but never treated as trusted, so a signature from one
+ * classifies as [[SigningVerdict.Revoked]] rather than [[SigningVerdict.Untrusted]]. Known shared-platform signing keys
+ * (e.g. a forge's web-flow key) are refused at load time — trusting them would collapse attribution to "has push
+ * access".
  */
 final class TrustedKeys private (private val byKeyId: Map[Long, Vector[LoadedKey]]) {
   private[mill] def candidates(keyId: Long): Vector[LoadedKey] = byKeyId.getOrElse(keyId, Vector.empty)
-
-  /** Full fingerprints of every loaded key/subkey that is not revoked. */
-  def trustedFingerprints: Set[String] = byKeyId.values.flatten.filterNot(_.revoked).map(_.fingerprint).toSet
 }
 
 object TrustedKeys {
@@ -57,24 +73,19 @@ object TrustedKeys {
   val KnownPlatformKeyIds: Set[String] = Set("B5690EEEBB952194")
 
   /** Load every regular file in `dir` as an armored key source. */
-  def fromDirectory(dir: os.Path, allowKnownPlatformKeys: Boolean = false): Either[String, TrustedKeys] =
+  def fromDirectory(dir: os.Path): Either[String, TrustedKeys] =
     if (!os.exists(dir) || !os.isDir(dir)) Left(s"trusted-keys configuration error: directory not found: $dir")
     else {
       val files = os.list(dir).filter(os.isFile)
       if (files.isEmpty) Left(s"trusted-keys configuration error: no key files found in $dir")
-      else parseAndBuild(files.map(f => f.last -> os.read.bytes(f)), allowKnownPlatformKeys)
+      else parseAndBuild(files.map(f => f.last -> os.read.bytes(f)))
     }
 
   /**
    * Load every blob under `path` in `refName`'s tree as an armored key source — never the working tree or an untrusted
    * ref.
    */
-  def fromRef(
-    repo: Repository,
-    refName: String,
-    path: String,
-    allowKnownPlatformKeys: Boolean = false
-  ): Either[String, TrustedKeys] =
+  def fromRef(repo: Repository, refName: String, path: String): Either[String, TrustedKeys] =
     Option(repo.resolve(s"$refName^{tree}")) match {
       case None         => Left(s"trusted-keys configuration error: ref not found: $refName")
       case Some(treeId) =>
@@ -91,15 +102,12 @@ object TrustedKeys {
               .map(_ => walk.getPathString -> reader.open(walk.getObjectId(0)).getBytes)
               .toVector
             if (files.isEmpty) Left(s"trusted-keys configuration error: no key files found at $refName:$path")
-            else parseAndBuild(files, allowKnownPlatformKeys)
+            else parseAndBuild(files)
           } finally reader.close()
         } finally walk.close()
     }
 
-  private def parseAndBuild(
-    sources: Seq[(String, Array[Byte])],
-    allowKnownPlatformKeys: Boolean
-  ): Either[String, TrustedKeys] = {
+  private def parseAndBuild(sources: Seq[(String, Array[Byte])]): Either[String, TrustedKeys] = {
     val calc = new JcaKeyFingerprintCalculator()
     sources
       .foldLeft[Either[String, Vector[PGPPublicKeyRing]]](Right(Vector.empty)) { case (acc, (name, bytes)) =>
@@ -112,7 +120,7 @@ object TrustedKeys {
             .map(rings ++ _)
         }
       }
-      .flatMap(build(_, allowKnownPlatformKeys))
+      .flatMap(build(_))
   }
 
   /**
@@ -121,16 +129,15 @@ object TrustedKeys {
    */
   private[mill] def build(
     rings: Vector[PGPPublicKeyRing],
-    allowKnownPlatformKeys: Boolean,
     knownPlatformKeyIds: Set[String] = KnownPlatformKeyIds
   ): Either[String, TrustedKeys] = {
     val allKeys = rings.flatMap(_.getPublicKeys.asScala.toVector)
     val refused = allKeys.filter(k => knownPlatformKeyIds.contains(f"${k.getKeyID}%016X"))
-    if (refused.nonEmpty && !allowKnownPlatformKeys)
+    if (refused.nonEmpty)
       Left(
         "refusing to load known shared platform signing key(s): " +
           refused.map(k => f"${k.getKeyID}%016X").mkString(", ") +
-          " — trusting these collapses attribution to \"has push access\"; pass allowKnownPlatformKeys=true to override"
+          " — trusting these collapses attribution to \"has push access\""
       )
     else {
       val loaded = rings.flatMap { ring =>
@@ -232,16 +239,13 @@ object SigningVerify {
    * signature was attached, so it holds regardless of the exact header-wrap format used.
    */
   private[mill] def stripGpgSigHeader(raw: Array[Byte]): Array[Byte] = {
-    val iso   = StandardCharsets.ISO_8859_1
-    val text  = new String(raw, iso)
-    val lines = text.split("(?<=\n)").toVector
-    val kept  = new StringBuilder
-    var inSig = false
-    lines.foreach { line =>
-      if (!inSig && line.startsWith("gpgsig ")) inSig = true
-      else if (inSig && line.startsWith(" ")) ()
-      else { inSig = false; kept.append(line) }
+    val iso       = StandardCharsets.ISO_8859_1
+    // Split keeps each line's trailing newline, so the kept lines reconstruct the original bytes exactly.
+    val lines     = new String(raw, iso).split("(?<=\n)").toVector
+    val (kept, _) = lines.foldLeft((Vector.empty[String], false)) { case ((kept, inSig), line) =>
+      if ((!inSig && line.startsWith("gpgsig ")) || (inSig && line.startsWith(" "))) (kept, true)
+      else (kept :+ line, false)
     }
-    kept.toString.getBytes(iso)
+    kept.mkString.getBytes(iso)
   }
 }

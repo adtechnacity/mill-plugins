@@ -188,32 +188,26 @@ object VerifyMainTest extends TestSuite {
 
     test("a range exceeding the commit ceiling fails closed") {
       withRepo { (dir, git) =>
-        val c1       = commitFile(git, dir, "a.txt", "1", "c1")
-        val c2       = commitFile(git, dir, "a.txt", "2", "c2")
-        val c3       = commitFile(git, dir, "a.txt", "3", "c3")
-        val update   = VerifyMain.RefUpdate(c1.getName, c3.getName, "refs/heads/main")
-        val ceilings = VerifyMain.Ceilings(maxCommits = 1, maxChangedLinesPerCommit = 20000)
+        val c1     = commitFile(git, dir, "a.txt", "1", "c1")
+        commitFile(git, dir, "a.txt", "2", "c2")
+        val c3     = commitFile(git, dir, "a.txt", "3", "c3")
+        val update = VerifyMain.RefUpdate(c1.getName, c3.getName, "refs/heads/main")
 
-        val result = VerifyMain.commitsToVerify(git.getRepository, update, ceilings)
+        val result = VerifyMain.commitsToVerify(git.getRepository, update, maxCommits = 1)
         assert(result.isLeft)
         assert(result.left.exists(_.contains("resource ceiling")))
       }
     }
 
-    test("a commit whose diff exceeds the changed-line ceiling fails closed") {
+    test("a range within the commit ceiling is returned in full") {
       withRepo { (dir, git) =>
-        val mainTip  = commitFile(git, dir, "a.txt", "x", "init")
-        val pushed   = commitFile(git, dir, "a.txt", "line1\nline2\nline3\n", "grow")
-        val ceilings = VerifyMain.Ceilings(maxCommits = 500, maxChangedLinesPerCommit = 1)
+        val c1     = commitFile(git, dir, "a.txt", "1", "c1")
+        commitFile(git, dir, "a.txt", "2", "c2")
+        val c3     = commitFile(git, dir, "a.txt", "3", "c3")
+        val update = VerifyMain.RefUpdate(c1.getName, c3.getName, "refs/heads/main")
 
-        val failures = VerifyMain.verifyUpdate(
-          git.getRepository,
-          VerifyMain.RefUpdate(mainTip.getName, pushed.getName, "refs/heads/main"),
-          "refs/heads/main",
-          trustedKeysPath,
-          ceilings
-        )
-        assert(failures.exists(_.contains("resource ceiling")))
+        val result = VerifyMain.commitsToVerify(git.getRepository, update, maxCommits = 2)
+        assert(result.exists(_.size == 2))
       }
     }
 

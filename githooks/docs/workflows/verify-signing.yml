@@ -16,23 +16,9 @@ name: Verify commit signing
 # store (`.mill-signing/trusted-keys`) and `signingConditions` config trustworthy against the
 # PR they are judging — including a PR that edits either of them.
 #
-# Required branch protection for this check to mean anything (documented, not automatable
-# from here — configure in repo Settings > Branches):
-#   - Require this check to pass before merging, and "require branches to be up to date".
-#     Note: GitHub's "update branch" button offers a rebase option that destroys trusted
-#     signatures on the updated commits — use "update by merge" instead.
-#   - Block direct pushes and force-pushes to the protected branch.
-#   - Disable squash-merge and rebase-merge for this branch; allow "create a merge commit"
-#     only. Squash/rebase merges synthesize a brand-new, never-verified commit at merge time;
-#     a real merge commit preserves the verified PR-head commits, and the merge commit itself
-#     is exempt via GitDiff's combined-diff contract (empty combined diff -> nothing to sign).
-#   - Require CODEOWNERS review on `.mill-signing/`, `build.mill`, and `.github/workflows/`
-#     (a PR that edits THIS file could otherwise green its own weakened check — CODEOWNERS
-#     only adds a review gate, though; where available, GitHub repository rulesets with
-#     "require workflows, pinned to a ref" is the stronger fix).
-#   - If release automation pushes directly to the protected branch (as this repo's `rel`
-#     module does), route releases through a PR instead, or document a scoped, governed
-#     exemption. Don't leave it silently unaddressed.
+# This file alone enforces nothing: the required-check status, branch protection, merge-strategy
+# restrictions, CODEOWNERS, and the release-flow interaction all live in repo Settings and are
+# spelled out in ../signing.md under "Required branch protection" and "Release-flow interaction".
 
 on:
   pull_request:
