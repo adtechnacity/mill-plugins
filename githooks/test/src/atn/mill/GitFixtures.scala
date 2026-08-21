@@ -72,29 +72,43 @@ object GitFixtures {
   }
 
   /**
-   * Build a commit whose tree is exactly `files` (flat names only), with arbitrary parents — the way to construct
-   * precise merge shapes without running a merge. Returns the commit id; no ref is updated.
+   * Build a commit whose tree is exactly `files` (flat names only), with arbitrary parents, and insert it. `sign` turns
+   * the commit's pre-signature bytes — exactly what a real signer signs — into the signatures for its `gpgsig` header;
+   * returning nothing leaves the commit unsigned. Returns the commit id; no ref is updated.
    */
-  def rawCommit(git: Git, files: Map[String, String], parents: Seq[ObjectId], msg: String): ObjectId = {
-    val repo = git.getRepository
-    val ins  = repo.newObjectInserter()
+  private def insertCommit(
+    git: Git,
+    files: Map[String, String],
+    parents: Seq[ObjectId],
+    msg: String,
+    sign: Array[Byte] => Seq[PGPSignature]
+  ): ObjectId = {
+    val ins = git.getRepository.newObjectInserter()
     try {
-      val tf  = new TreeFormatter()
+      val tf   = new TreeFormatter()
       files.toSeq.sortBy(_._1).foreach { case (name, content) =>
         val blob = ins.insert(Constants.OBJ_BLOB, content.getBytes("UTF-8"))
         tf.append(name, FileMode.REGULAR_FILE, blob)
       }
-      val cb  = new CommitBuilder()
+      val cb   = new CommitBuilder()
       cb.setTreeId(ins.insert(tf))
       cb.setParentIds(parents*)
       cb.setAuthor(ident)
       cb.setCommitter(ident)
       cb.setMessage(msg)
-      val cid = ins.insert(cb)
+      val sigs = sign(cb.build())
+      if (sigs.nonEmpty) cb.setGpgSignature(new GpgSignature(armor(sigs*)))
+      val cid  = ins.insert(cb)
       ins.flush()
       cid
     } finally ins.close()
   }
+
+  /**
+   * An unsigned commit with arbitrary parents — the way to construct precise merge shapes without running a merge.
+   */
+  def rawCommit(git: Git, files: Map[String, String], parents: Seq[ObjectId], msg: String): ObjectId =
+    insertCommit(git, files, parents, msg, _ => Nil)
 
   /** An in-memory RSA-2048 OpenPGP key pair; never touches a real GPG home or a keyserver. */
   def genKeyPair(created: Date = new Date()): PGPKeyPair = {
@@ -158,28 +172,6 @@ object GitFixtures {
     out.toString("US-ASCII")
   }
 
-  /** Build a not-yet-inserted commit + its pre-signature payload bytes (what a real signer signs). */
-  private def unsignedCommit(
-    repo: org.eclipse.jgit.lib.Repository,
-    ins: org.eclipse.jgit.lib.ObjectInserter,
-    files: Map[String, String],
-    parents: Seq[ObjectId],
-    msg: String
-  ): (CommitBuilder, Array[Byte]) = {
-    val tf = new TreeFormatter()
-    files.toSeq.sortBy(_._1).foreach { case (name, content) =>
-      val blob = ins.insert(Constants.OBJ_BLOB, content.getBytes("UTF-8"))
-      tf.append(name, FileMode.REGULAR_FILE, blob)
-    }
-    val cb = new CommitBuilder()
-    cb.setTreeId(ins.insert(tf))
-    cb.setParentIds(parents*)
-    cb.setAuthor(ident)
-    cb.setCommitter(ident)
-    cb.setMessage(msg)
-    (cb, cb.build())
-  }
-
   private def detachedSignature(payload: Array[Byte], signer: PGPKeyPair, signatureTime: Date): PGPSignature = {
     val sigGen = new PGPSignatureGenerator(
       new JcaPGPContentSignerBuilder(signer.getPublicKey.getAlgorithm, HashAlgorithmTags.SHA256)
@@ -201,9 +193,9 @@ object GitFixtures {
   }
 
   /**
-   * Build a commit exactly like [[rawCommit]], then attach a detached OpenPGP signature over its header-stripped raw
-   * bytes signed by `signer`, so the result round-trips through `RevCommit.getRawGpgSignature()` like a real
-   * `git commit -S`. `signatureTime` lets tests place the signature outside a short-lived key's validity window.
+   * A commit like [[rawCommit]], carrying a detached OpenPGP signature over its pre-signature bytes signed by `signer`,
+   * so the result round-trips through `RevCommit.getRawGpgSignature()` like a real `git commit -S`. `signatureTime`
+   * lets tests place the signature outside a short-lived key's validity window.
    */
   def signedCommit(
     git: Git,
@@ -212,16 +204,8 @@ object GitFixtures {
     msg: String,
     signer: PGPKeyPair,
     signatureTime: Date = new Date()
-  ): ObjectId = {
-    val ins = git.getRepository.newObjectInserter()
-    try {
-      val (cb, payload) = unsignedCommit(git.getRepository, ins, files, parents, msg)
-      cb.setGpgSignature(new GpgSignature(armor(detachedSignature(payload, signer, signatureTime))))
-      val cid           = ins.insert(cb)
-      ins.flush()
-      cid
-    } finally ins.close()
-  }
+  ): ObjectId =
+    insertCommit(git, files, parents, msg, p => Seq(detachedSignature(p, signer, signatureTime)))
 
   /** A commit whose `gpgsig` header carries two independent signature packets in one armored blob. */
   def multiSignedCommit(
@@ -231,16 +215,6 @@ object GitFixtures {
     msg: String,
     signer1: PGPKeyPair,
     signer2: PGPKeyPair
-  ): ObjectId = {
-    val ins = git.getRepository.newObjectInserter()
-    try {
-      val (cb, payload) = unsignedCommit(git.getRepository, ins, files, parents, msg)
-      val sig1          = detachedSignature(payload, signer1, new Date())
-      val sig2          = detachedSignature(payload, signer2, new Date())
-      cb.setGpgSignature(new GpgSignature(armor(sig1, sig2)))
-      val cid           = ins.insert(cb)
-      ins.flush()
-      cid
-    } finally ins.close()
-  }
+  ): ObjectId =
+    insertCommit(git, files, parents, msg, p => Seq(signer1, signer2).map(detachedSignature(p, _, new Date())))
 }

@@ -23,12 +23,8 @@ object VerifyMain {
 
   private[mill] val ZeroId: String = "0" * 40
 
-  /** DoS guards on untrusted push volume: exceeding either fails the whole ref update closed, never silently. */
-  final private[mill] case class Ceilings(maxCommits: Int, maxChangedLinesPerCommit: Int)
-
-  private[mill] object Ceilings {
-    val Default: Ceilings = Ceilings(maxCommits = 500, maxChangedLinesPerCommit = 20000)
-  }
+  /** DoS guard on untrusted push volume: a range longer than this fails the whole ref update closed, never silently. */
+  private[mill] val DefaultMaxCommits: Int = 500
 
   /** One `old_sha new_sha ref_name` line of the real git pre-receive stdin protocol. */
   final private[mill] case class RefUpdate(oldId: String, newId: String, ref: String)
@@ -45,9 +41,6 @@ object VerifyMain {
       }
     }
 
-  private[mill] def openRepo(gitDir: os.Path): Repository =
-    new RepositoryBuilder().setGitDir(gitDir.toIO).readEnvironment().build()
-
   /** The trust root defaults to the repo's own current `HEAD` symref, e.g. `refs/heads/main`. */
   private[mill] def defaultTrustRootRef(repo: Repository): String =
     Option(repo.getFullBranch).getOrElse(Constants.HEAD)
@@ -63,7 +56,7 @@ object VerifyMain {
   private[mill] def commitsToVerify(
     repo: Repository,
     update: RefUpdate,
-    ceilings: Ceilings
+    maxCommits: Int
   ): Either[String, Vector[RevCommit]] =
     if (update.newId == ZeroId) Right(Vector.empty)
     else
@@ -73,44 +66,16 @@ object VerifyMain {
           walk.markStart(walk.parseCommit(ObjectId.fromString(update.newId)))
           if (update.oldId != ZeroId) walk.markUninteresting(walk.parseCommit(ObjectId.fromString(update.oldId)))
           else existingRefTips(repo).foreach(id => Try(walk.parseCommit(id)).foreach(walk.markUninteresting))
-          val out   = Vector.newBuilder[RevCommit]
-          var count = 0
-          var next  = walk.next()
-          while (next != null) {
-            count += 1
-            if (count > ceilings.maxCommits)
-              throw new IllegalStateException(s"range exceeds the ${ceilings.maxCommits}-commit resource ceiling")
-            out += next
-            next = walk.next()
-          }
-          out.result()
+          // One past the ceiling is enough to detect the overrun without draining an unbounded range.
+          val commits = Iterator.continually(walk.next()).takeWhile(_ != null).take(maxCommits + 1).toVector
+          if (commits.size > maxCommits)
+            throw new IllegalStateException(s"range exceeds the $maxCommits-commit resource ceiling")
+          commits
         } finally walk.close()
       }.toEither.left.map(e => s"${update.ref}: ${Option(e.getMessage).getOrElse(e.getClass.getSimpleName)}")
 
   private def changesOf(repo: Repository, commit: RevCommit): Either[String, GitDiff.ChangeSet] =
     if (commit.getParentCount >= 2) GitDiff.mergeCombinedChanges(repo, commit) else GitDiff.commitChanges(repo, commit)
-
-  private def changedLines(cs: GitDiff.ChangeSet): Int = cs.iterator.map(f => f.added.size + f.removed.size).sum
-
-  private def verdictFailure(
-    commit: RevCommit,
-    reasons: Vector[SigningReason],
-    trusted: TrustedKeys
-  ): Option[String] = {
-    val sha = commit.getName.take(8)
-    SigningVerify.verify(commit, trusted) match {
-      case SigningVerdict.Trusted(_)        => None
-      case SigningVerdict.Unsigned          =>
-        Some(s"$sha: unsigned but signing is required (${reasons.map(_.condition).distinct.mkString(", ")})")
-      case SigningVerdict.Unverifiable(fmt) =>
-        Some(s"$sha: signature format '$fmt' is not verifiable (the server enforces OpenPGP only)")
-      case SigningVerdict.Invalid(reason)   => Some(s"$sha: invalid signature ($reason)")
-      case SigningVerdict.Untrusted(fp)     =>
-        Some(s"$sha: signed by an untrusted key ($fp) — a maintainer must re-sign or add this key to the trust root")
-      case SigningVerdict.Revoked(fp)       => Some(s"$sha: signed by a revoked key ($fp)")
-      case SigningVerdict.Expired(fp)       => Some(s"$sha: signed by a key expired at signing time ($fp)")
-    }
-  }
 
   /**
    * Verify one ref update. Trusted keys are loaded at most once, and only when some commit in range actually triggers a
@@ -122,9 +87,9 @@ object VerifyMain {
     update: RefUpdate,
     trustRootRef: String,
     trustedKeysPath: String,
-    ceilings: Ceilings
+    maxCommits: Int
   ): Vector[String] =
-    commitsToVerify(repo, update, ceilings) match {
+    commitsToVerify(repo, update, maxCommits) match {
       case Left(err)      => Vector(err)
       case Right(commits) =>
         val triggered =
@@ -132,13 +97,9 @@ object VerifyMain {
             acc.flatMap { xs =>
               changesOf(repo, c).left
                 .map(e => s"${c.getName.take(8)}: $e")
-                .flatMap { cs =>
-                  if (changedLines(cs) > ceilings.maxChangedLinesPerCommit)
-                    Left(s"${c.getName.take(8)}: diff exceeds the ${ceilings.maxChangedLinesPerCommit}-line resource ceiling")
-                  else {
-                    val reasons = SigningConditions.evaluate(SigningConditions.defaults, cs)
-                    Right(if (reasons.isEmpty) xs else xs :+ c -> reasons)
-                  }
+                .map { cs =>
+                  val reasons = SigningConditions.evaluate(SigningConditions.defaults, cs)
+                  if (reasons.isEmpty) xs else xs :+ c -> reasons
                 }
             }
           }
@@ -148,7 +109,10 @@ object VerifyMain {
           case Right(fired)                  =>
             TrustedKeys.fromRef(repo, trustRootRef, trustedKeysPath) match {
               case Left(err)      => Vector(s"${update.ref}: signing configuration error: $err")
-              case Right(trusted) => fired.flatMap { case (c, reasons) => verdictFailure(c, reasons, trusted) }
+              case Right(trusted) =>
+                fired.flatMap { case (c, reasons) =>
+                  SigningVerify.verify(c, trusted).rejection(c.getName.take(8), reasons)
+                }
             }
         }
     }
@@ -164,9 +128,9 @@ object VerifyMain {
     trustRootRefOverride: Option[String],
     trustedKeysPath: String,
     stdinLines: Iterator[String],
-    ceilings: Ceilings = Ceilings.Default
+    maxCommits: Int = DefaultMaxCommits
   ): (Int, Vector[String]) =
-    Try(openRepo(gitDir)) match {
+    Try(new RepositoryBuilder().setGitDir(gitDir.toIO).readEnvironment().build()) match {
       case scala.util.Failure(e)    => (1, Vector(s"cannot open repository at $gitDir: ${e.getMessage}"))
       case scala.util.Success(repo) =>
         try {
@@ -174,7 +138,7 @@ object VerifyMain {
           parseUpdates(stdinLines) match {
             case Left(err)      => (1, Vector(err))
             case Right(updates) =>
-              val failures = updates.flatMap(verifyUpdate(repo, _, trustRootRef, trustedKeysPath, ceilings))
+              val failures = updates.flatMap(verifyUpdate(repo, _, trustRootRef, trustedKeysPath, maxCommits))
               if (failures.isEmpty) (0, Vector.empty) else (1, failures)
           }
         } finally repo.close()

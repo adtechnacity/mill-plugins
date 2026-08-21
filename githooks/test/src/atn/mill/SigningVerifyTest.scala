@@ -111,17 +111,16 @@ object SigningVerifyTest extends TestSuite {
       }
     }
 
-    test("a known shared platform key is refused at load unless explicitly allowed") {
+    test("a known shared platform key is refused at load, naming the offending key id") {
       val platform = genKeyPair()
       val hex      = f"${platform.getPublicKey.getKeyID}%016X"
-      val ring     = keyRing(platform)
 
-      val refused = TrustedKeys.build(Vector(ring), allowKnownPlatformKeys = false, knownPlatformKeyIds = Set(hex))
+      val refused = TrustedKeys.build(Vector(keyRing(platform)), knownPlatformKeyIds = Set(hex))
       assert(refused.isLeft)
       assert(refused.left.exists(_.contains(hex)))
 
-      val allowed = TrustedKeys.build(Vector(ring), allowKnownPlatformKeys = true, knownPlatformKeyIds = Set(hex))
-      assert(allowed.isRight)
+      // A key outside the platform set loads normally — the refusal is targeted, not a blanket rejection.
+      assert(TrustedKeys.build(Vector(keyRing(genKeyPair())), knownPlatformKeyIds = Set(hex)).isRight)
     }
 
     test("keys loaded from a git ref's tree verify identically to keys loaded from a worktree directory") {

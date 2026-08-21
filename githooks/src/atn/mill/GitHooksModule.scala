@@ -303,18 +303,7 @@ object GitHooksModule extends ExternalModule with GitHooksModule {
             case Left(err)                                                                  =>
               Some(s"$sha: signing configuration error: $err")
             case Right(trusted)                                                             =>
-              SigningVerify.verify(commit, trusted) match {
-                case SigningVerdict.Trusted(_)        => None
-                case SigningVerdict.Unsigned          =>
-                  Some(s"$sha: unsigned but signing is required (${reasons.map(_.condition).distinct.mkString(", ")})")
-                case SigningVerdict.Unverifiable(fmt) =>
-                  Some(s"$sha: signature format '$fmt' is not verifiable (v1 supports OpenPGP only)")
-                case SigningVerdict.Invalid(reason)   => Some(s"$sha: invalid signature ($reason)")
-                case SigningVerdict.Untrusted(fp)     =>
-                  Some(s"$sha: signed by an untrusted key ($fp) — a maintainer must re-sign or add this key to the trust root")
-                case SigningVerdict.Revoked(fp)       => Some(s"$sha: signed by a revoked key ($fp)")
-                case SigningVerdict.Expired(fp)       => Some(s"$sha: signed by a key expired at signing time ($fp)")
-              }
+              SigningVerify.verify(commit, trusted).rejection(sha, reasons)
           }
     }
   }
