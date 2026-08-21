@@ -7,9 +7,8 @@ import mill.scalalib.scalafmt._
 import mainargs.{arg, ArgSig, TokensReader}
 
 import org.eclipse.jgit.api.Git
-import org.eclipse.jgit.lib.RepositoryBuilder
+import org.eclipse.jgit.lib.{Repository, RepositoryBuilder}
 import org.eclipse.jgit.revwalk.{RevCommit, RevWalk}
-import org.eclipse.jgit.revwalk.filter.RevFilter
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -54,6 +53,39 @@ trait GitHooksModule extends DefaultTaskModule {
   /** Module names to exclude from valid module resolution. */
   def excludedModuleNames: Set[String] = Set("test", "integration")
 
+  /** Suppression-marker patterns for the [[ExceptionComments]] signing condition. */
+  def exceptionCommentMarkers: Seq[String] = SigningConditions.DefaultMarkers
+
+  /** Test-case header patterns for the [[TestProtection]] signing condition. */
+  def testCasePatterns: Seq[String] = SigningConditions.DefaultCasePatterns
+
+  /** Path globs guarded by the [[ProtectedPaths]] signing condition (trust store, tool configs). */
+  def protectedPathGlobs: Seq[String] = SigningConditions.DefaultProtectedGlobs
+
+  /**
+   * The pluggable signing-condition set (R1). Override this def directly to supply a fully custom list; override
+   * [[exceptionCommentMarkers]], [[testCasePatterns]], or [[protectedPathGlobs]] to adjust the built-ins without
+   * hand-building conditions (R7).
+   */
+  def signingConditions: Seq[SigningCondition] =
+    SigningConditions.defaults(
+      exceptionCommentMarkers,
+      SigningConditions.DefaultTestPathPattern,
+      testCasePatterns,
+      protectedPathGlobs,
+      SigningConditions.DefaultSourcePattern
+    )
+
+  /**
+   * Directory, relative to the repo root, holding trusted signers' armored public keys. Signing enforcement activates
+   * (hooks gain the checkSigning/verifyRange lines) only when this directory contains at least one key file — a default
+   * install with no keys is byte-identical to a repo that never adopted signing.
+   */
+  def trustedKeysDir: String = ".mill-signing/trusted-keys"
+
+  /** [[trustedKeysDir]] resolved against the repo root. */
+  private def resolvedTrustedKeysDir(rootDir: os.Path): os.Path = rootDir / os.RelPath(trustedKeysDir)
+
   def install(
     evaluator: Evaluator,
     @arg(
@@ -63,14 +95,17 @@ trait GitHooksModule extends DefaultTaskModule {
     ) force: Boolean = false
   ) =
     Task.Command(exclusive = true)[WorkDone] {
-      val ev = EvaluatorProxy(() => evaluator)
+      val ev            = EvaluatorProxy(() => evaluator)
+      val keysDir       = resolvedTrustedKeysDir(ev.rootModule.moduleDir)
+      val signingActive = os.exists(keysDir) && os.isDir(keysDir) && os.list(keysDir).exists(os.isFile)
       new GitInstall(
         ev.rootModule.moduleDir / ".git/hooks",
         ev.baseLogger,
         preCommitExtraCommands,
         prePushExtraCommands,
         selectiveSnapshotTasks,
-        selectivePreCommitTasks
+        selectivePreCommitTasks,
+        signingActive
       )
         .install(force) match {
         case scala.util.Success(result) => result
@@ -99,6 +134,75 @@ trait GitHooksModule extends DefaultTaskModule {
       val validator = GitRepo.repo.map(new GitValidateCommit(_, conventionalCommitTypes, modules, ev.baseLogger))
       val msg       = os.read(file)
       validator.flatMap(_.validate(msg))
+    }
+
+  /**
+   * Pre-commit signing intent check (R4): evaluates [[signingConditions]] over the staged diff (read from `index` when
+   * given — the hook passes `$GIT_INDEX_FILE` so `git commit -a`/pathspec temporary indexes are honored) and, if any
+   * condition fires, requires `commit.gpgsign=true` in the repo-local config. Real signature verification happens at
+   * push time; this only checks that the commit about to be made will end up signed. A merge in progress (`MERGE_HEAD`
+   * present) is skipped with a notice — a staged diff mid-merge shows the whole merged branch as added, which would
+   * false-reject routine merges.
+   */
+  def checkSigning(
+    evaluator: Evaluator,
+    @arg(
+      name = "index",
+      doc = "path to the index file to read staged changes from (the hook passes $GIT_INDEX_FILE)"
+    ) index: Option[String] = None
+  ) =
+    Task.Command(exclusive = true)[Unit] {
+      val ev = EvaluatorProxy(() => evaluator)
+      GitRepo.repo.flatMap { repo =>
+        if (GitHooksModule.isMergeInProgress(repo))
+          ev.baseLogger.info("git.checkSigning: merge in progress, deferring signing check to pre-push")
+        GitHooksModule.checkSigningOutcome(repo, index.map(os.Path(_)), signingConditions) match {
+          case Right(()) => Result.Success(())
+          case Left(msg) => Result.Failure(s"git.checkSigning: $msg")
+        }
+      }
+    }
+
+  /**
+   * Verifies every commit in `oldRef..newRef` against [[signingConditions]] and the trusted keys in [[trustedKeysDir]]
+   * (R5, R10). `lenient` (the pre-push hook's mode) passes with a notice instead of failing when signing isn't
+   * configured at all — local config drift never blocks a push; CI and manual invocation use the strict default, where
+   * a missing or misconfigured trust store is a failure.
+   */
+  def verifyRange(
+    evaluator: Evaluator,
+    oldRef: String,
+    newRef: String,
+    @arg(
+      name = "lenient",
+      doc = "pass with a notice instead of failing when signing isn't configured (pre-push hook mode)"
+    ) lenient: Boolean = false
+  ) =
+    Task.Command(exclusive = true)[Unit] {
+      val ev = EvaluatorProxy(() => evaluator)
+      GitRepo.repo.flatMap { repo =>
+        Try {
+          val walk = new RevWalk(repo)
+          try {
+            val oldId =
+              Option(repo.resolve(oldRef)).getOrElse(throw new IllegalArgumentException(s"cannot resolve '$oldRef'"))
+            val newId =
+              Option(repo.resolve(newRef)).getOrElse(throw new IllegalArgumentException(s"cannot resolve '$newRef'"))
+            walk.markStart(walk.parseCommit(newId))
+            walk.markUninteresting(walk.parseCommit(oldId))
+            Iterator.continually(walk.next()).takeWhile(_ != null).toVector
+          } finally walk.close()
+        }.toEither.left
+          .map(e => s"git.verifyRange: ${e.getMessage}")
+          .flatMap { commits =>
+            val keysDir  = resolvedTrustedKeysDir(ev.rootModule.moduleDir)
+            val failures = commits.flatMap(GitHooksModule.commitFailure(repo, _, signingConditions, keysDir, lenient))
+            Either.cond(failures.isEmpty, (), failures.mkString("\n"))
+          } match {
+          case Right(()) => Result.Success(())
+          case Left(msg) => Result.Failure(msg)
+        }
+      }
     }
 
   /** Task selectors resolved by prePush to run tests before pushing. */
@@ -145,4 +249,62 @@ object GitHooksModule extends ExternalModule with GitHooksModule {
   override def defaultTask(): String = "install"
 
   lazy val millDiscover: Discover = Discover[this.type]
+
+  /** A merge in progress (`MERGE_HEAD` present) means a staged diff shows the whole merged branch as added. */
+  private[mill] def isMergeInProgress(repo: Repository): Boolean =
+    os.exists(os.Path(repo.getDirectory) / "MERGE_HEAD")
+
+  /**
+   * Core [[GitHooksModule.checkSigning]] logic, repo- and condition-parameterized so it's testable without a live Mill
+   * evaluator. `Right(())` means the commit-in-progress may proceed (nothing triggered, or triggered and
+   * `commit.gpgsign` is set); `Left` carries the rejection message.
+   */
+  private[mill] def checkSigningOutcome(
+    repo: Repository,
+    index: Option[os.Path],
+    conditions: Seq[SigningCondition]
+  ): Either[String, Unit] =
+    if (isMergeInProgress(repo)) Right(())
+    else
+      GitDiff.stagedChanges(repo, index).flatMap { changes =>
+        val reasons = SigningConditions.evaluate(conditions, changes)
+        if (reasons.isEmpty || repo.getConfig.getBoolean("commit", "gpgsign", false)) Right(())
+        else
+          Left(
+            "this change requires a signed commit —\n" +
+              reasons.map(r => s"  [${r.condition}] ${r.detail}").mkString("\n") +
+              "\nenable signing for this commit: `git config commit.gpgsign true` (or commit with `-S`)"
+          )
+      }
+
+  /**
+   * Core [[GitHooksModule.verifyRange]] per-commit logic, repo- and condition-parameterized for the same reason as
+   * [[checkSigningOutcome]]. `None` means the commit passes.
+   */
+  private[mill] def commitFailure(
+    repo: Repository,
+    commit: RevCommit,
+    conditions: Seq[SigningCondition],
+    keysDir: os.Path,
+    lenient: Boolean
+  ): Option[String] = {
+    val changes =
+      if (commit.getParentCount >= 2) GitDiff.mergeCombinedChanges(repo, commit)
+      else GitDiff.commitChanges(repo, commit)
+    val sha     = commit.getName.take(8)
+    changes match {
+      case Left(err) => Some(s"$sha: $err")
+      case Right(cs) =>
+        val reasons = SigningConditions.evaluate(conditions, cs)
+        if (reasons.isEmpty) None
+        else
+          TrustedKeys.fromDirectory(keysDir) match {
+            case Left(err) if lenient && err.startsWith("trusted-keys configuration error") => None
+            case Left(err)                                                                  =>
+              Some(s"$sha: signing configuration error: $err")
+            case Right(trusted)                                                             =>
+              SigningVerify.verify(commit, trusted).rejection(sha, reasons)
+          }
+    }
+  }
 }

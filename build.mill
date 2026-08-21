@@ -133,15 +133,63 @@ object githooks extends MillPluginModule {
   def mvnDeps      = Seq(
     mvn"org.kapunga::fallatol-ollama:0.3.1",
     mvn"org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r",
-    mvn"com.lihaoyi::mainargs:0.7.8"
+    // Version must stay in lockstep with the jgit core dep; brings the BouncyCastle PGP stack
+    // (bcpg/bcprov) used by SigningVerify.
+    mvn"org.eclipse.jgit:org.eclipse.jgit.gpg.bc:7.7.1.202607240634-r",
+    mvn"com.lihaoyi::mainargs:0.7.8",
+    // os.Path/os.* is used throughout the Mill-free layer (GitDiff, SigningConditions, SigningVerify,
+    // VerifyMain) but isn't itself Mill API — normally it only reaches the classpath via Mill's
+    // provided-scope mill-libs, which VerifyMain's coursier launch never has. Explicit runtime dep,
+    // pinned to the same version Mill itself currently bundles.
+    mvn"com.lihaoyi::os-lib:0.11.8"
   )
 
   // GitInstall is an internal helper (only GitHooksModule.install constructs it); the added
   // prePushExtraCommands param is defaulted, so the constructor change is source-compatible.
+  // GitDiff and its records are internal diff plumbing shared with the planned TSA feature;
+  // excluded from MiMa until both consumers have landed and the surface is reviewed.
   override def mimaBinaryIssueFilters =
-    super.mimaBinaryIssueFilters() ++ Seq(ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.GitInstall.this"))
+    super.mimaBinaryIssueFilters() ++ Seq(
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.GitInstall.this"),
+      ProblemFilter.exclude[Problem]("atn.mill.GitDiff*"),
+      ProblemFilter.exclude[Problem]("atn.mill.DiffLine*"),
+      ProblemFilter.exclude[Problem]("atn.mill.ParentLeg*"),
+      ProblemFilter.exclude[Problem]("atn.mill.ChangedFile*")
+    )
 
-  object test    extends MillPluginTests
+  object test extends MillPluginTests {
+    // Stages core+githooks as a local file:// Maven repo so VerifyMainTest's coursier smoke test can `cs launch`
+    // the unpublished artifact — same mechanism as MillPluginExampleTests.localM2Repo/forkEnv, scoped to this one
+    // test module rather than the shared trait.
+    def artifacts: T[Seq[(mill.scalalib.publish.Artifact, os.Path, os.Path)]] = Task {
+      Task.traverse(Seq(core, githooks)) { m =>
+        Task.Anon {
+          (m.artifactMetadata(), m.jar().path, m.pom().path)
+        }
+      }()
+    }
+
+    def localM2Repo: T[PathRef] = Task {
+      import java.nio.file.{Files, StandardCopyOption}
+      val repo = Task.dest / "m2repo"
+      for ((art, jar, pom) <- artifacts()) {
+        val base = repo / os.RelPath(art.group.replace('.', '/')) / art.id / art.version
+        os.makeDir.all(base)
+        Files.copy(jar.toNIO, (base / s"${art.id}-${art.version}.jar").toNIO, StandardCopyOption.REPLACE_EXISTING)
+        Files.copy(pom.toNIO, (base / s"${art.id}-${art.version}.pom").toNIO, StandardCopyOption.REPLACE_EXISTING)
+      }
+      PathRef(repo)
+    }
+
+    override def forkEnv = Task {
+      val repo     = localM2Repo().path
+      val existing = Task.env.getOrElse("COURSIER_REPOSITORIES", "ivy2Local|central")
+      Map(
+        "COURSIER_REPOSITORIES" -> s"${repo.toNIO.toUri.toASCIIString}|$existing",
+        "PLUGIN_VERSION"        -> projectVersion.currentVersion().toString
+      )
+    }
+  }
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(core, githooks)
   }

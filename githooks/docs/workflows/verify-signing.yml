@@ -1,0 +1,140 @@
+name: Verify commit signing
+
+# Reference workflow for the conditional-commit-signing feature (githooks plugin).
+# Ships as documentation only — adopting it in a given repo (required-check status, branch
+# protection, merge-strategy restrictions, CODEOWNERS) is a separate maintainer decision.
+# See ../signing.md, "CI / remote gate" section, for the full picture including what this
+# file deliberately does NOT enforce on its own (branch protection lives in repo Settings,
+# not in YAML).
+#
+# Trusted-checkout posture: every step in this job runs against code checked out from the
+# ref the workflow itself is running on (the default branch for `pull_request` events, or
+# whatever ref the dispatch was made from for `workflow_dispatch`) — never from the PR. The
+# PR under review is pulled in ONLY as raw git history (commits/trees/blobs, via a plain
+# `git fetch`) for `git.verifyRange` to walk. Its working tree, its `build.mill`, and its own
+# copy of this very file are never checked out or executed. That is what makes the trust
+# store (`.mill-signing/trusted-keys`) and `signingConditions` config trustworthy against the
+# PR they are judging — including a PR that edits either of them.
+#
+# This file alone enforces nothing: the required-check status, branch protection, merge-strategy
+# restrictions, CODEOWNERS, and the release-flow interaction all live in repo Settings and are
+# spelled out in ../signing.md under "Required branch protection" and "Release-flow interaction".
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # Deliberately no `paths:` filter: a PR editing the trust store or a protected tool
+    # config is exactly the case this check exists to catch. Narrowing the trigger here
+    # would be a bypass.
+  workflow_dispatch:
+    # Entry point for PRs that never fire `pull_request` at all — e.g. this repo's own Scala
+    # Steward workflow (.github/workflows/scala-steward.yml) authors PRs with GITHUB_TOKEN,
+    # and GITHUB_TOKEN-authored pushes/PRs never trigger event-based workflows. Takes a PR
+    # number and resolves its base/head SHAs via the GitHub API from INSIDE this trusted
+    # workflow below — never from caller-supplied SHAs — so the "SHAs only from trusted
+    # code" invariant holds for this entry point too.
+    inputs:
+      pr_number:
+        description: "Pull request number to verify (bot-PR / manual-run entry point)"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verify-signing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the trusted (workflow-ref) code
+        uses: actions/checkout@v4
+        with:
+          # No `ref:` override: checkout defaults to the ref this workflow itself is running
+          # on. That default is the load-bearing property of this job — it is what keeps
+          # build.mill, signingConditions config, and the trust store itself immune to a PR
+          # editing its own judge.
+          fetch-depth: 0 # full history: the old..new walk and merge-base check both need it
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: 21
+
+      - name: Cache Coursier
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/coursier
+          key: ${{ runner.os }}-coursier-${{ hashFiles('build.mill', 'mill-build/build.mill', '**/build.mill') }}
+          restore-keys: ${{ runner.os }}-coursier-
+
+      - name: Cache Mill
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mill
+          key: ${{ runner.os }}-mill-${{ hashFiles('.mill-version') }}
+          restore-keys: ${{ runner.os }}-mill-
+
+      - name: Resolve base/head SHAs
+        id: range
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Never trust a dispatch-supplied SHA — only the PR number is caller input; the
+            # actual SHAs are looked up here, inside the trusted workflow, via the API.
+            pr_number="$DISPATCH_PR_NUMBER"
+            base="$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json baseRefOid -q .baseRefOid)"
+            head="$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)"
+          else
+            pr_number="$EVENT_PR_NUMBER"
+            base="$PR_BASE_SHA"
+            head="$PR_HEAD_SHA"
+          fi
+          if [ -z "$base" ] || [ -z "$head" ] || [ -z "$pr_number" ]; then
+            echo "::error::could not resolve pr_number/base/head (pr_number='$pr_number' base='$base' head='$head')"
+            exit 1
+          fi
+          if [ "$base" = "$head" ]; then
+            echo "::error::base and head SHA are identical ($base) — refusing a no-op range"
+            exit 1
+          fi
+          {
+            echo "pr_number=$pr_number"
+            echo "base=$base"
+            echo "head=$head"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the PR as raw git data (no working-tree checkout)
+        env:
+          PR_NUMBER: ${{ steps.range.outputs.pr_number }}
+          BASE_SHA: ${{ steps.range.outputs.base }}
+          HEAD_SHA: ${{ steps.range.outputs.head }}
+        run: |
+          set -euo pipefail
+          # Pulls the PR's commits/trees/blobs in for git.verifyRange to walk — nothing from
+          # the PR is ever checked out into the working tree or executed.
+          git fetch origin "refs/pull/${PR_NUMBER}/head" "$BASE_SHA"
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::fetched PR head ref does not resolve to expected head SHA $HEAD_SHA"
+            exit 1
+          fi
+          if ! git merge-base "$BASE_SHA" "$HEAD_SHA" >/dev/null 2>&1; then
+            echo "::error::no merge-base between $BASE_SHA and $HEAD_SHA — history not linked, failing closed"
+            exit 1
+          fi
+
+      - name: Verify signing (strict)
+        env:
+          BASE_SHA: ${{ steps.range.outputs.base }}
+          HEAD_SHA: ${{ steps.range.outputs.head }}
+        # No --lenient here (unlike the local pre-push hook): a missing or misconfigured
+        # trust store is a hard failure. This job — or eventually a server-side pre-receive
+        # hook — is the actual enforcement layer; local hooks are feedback only.
+        run: ./mill git.verifyRange "$BASE_SHA" "$HEAD_SHA"

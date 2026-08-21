@@ -1,0 +1,275 @@
+# Conditional commit signing
+
+Most commits stay friction-free. A small set of *signing conditions* — quality-tool
+suppression markers, edits or deletions of existing test cases, and changes to protected
+paths — require a GPG-signed commit from a trusted key. Nothing else is affected: a repo
+with no trusted keys configured behaves exactly as it did before this feature existed.
+
+## Enablement
+
+Trusted signers' armored public keys live in `trustedKeysDir` (default
+`.mill-signing/trusted-keys`, overridable as a `def` on your `GitHooksModule`). There is no
+separate on/off switch — **enforcement activates the moment that directory holds at least
+one key file**, and `./mill git.install` only emits the signing lines into your hooks once
+that's true. A default install with an empty or missing keys dir is byte-identical to a
+repo that never adopted this feature.
+
+Export a trusted signer's public key and drop it into the trust store:
+
+```bash
+gpg --export --armor <key-id> > .mill-signing/trusted-keys/<name>.asc
+```
+
+Trust-store changes are themselves a protected-path change (see below), so once signing is
+active, adding or removing a key requires the same signed-commit ceremony as any other
+protected change.
+
+### Bootstrap ordering (hard prerequisite)
+
+The **first** trusted key must land on the trust root *before* any server-side pre-receive
+hook is installed — or via a direct admin server-side ref update. The remote gate reads keys
+from the trust root's state, so a repo that installs enforcement before it has a first
+trusted key locks itself out. An empty keys dir is a configuration error only for pushes that
+actually contain protected commits; unprotected pushes to a non-adopting repo are unaffected.
+
+### Key rotation ordering
+
+A rotated or newly added key must land in **its own push first**. Remote gates always load
+keys from the trust root's *pre-push* state — a commit that relies on a brand-new key added
+in the *same* push that introduces it will not verify, because the gate reads the trust root
+as it stood before that push landed.
+
+## What triggers signing
+
+Three built-in conditions, all overridable:
+
+- **Exception/suppression markers** (`exceptionCommentMarkers`) — fires when an *added* line
+  matches a suppression pattern. Defaults: scalafmt `format: off`, scalafix
+  `scalafix:off`/`scalafix:ok`, scalastyle `scalastyle:off`, `NOSONAR`, CodeScene disable
+  directives, `@nowarn`, `@SuppressWarnings`. Removing a marker, or working near an existing
+  one, never fires.
+
+- **Test-case protection** (`testCasePatterns`) — fires when an existing test case is removed
+  or modified, resolved case-by-case against the file's *old* path and *old* content. **Pure
+  insertions never fire — this is a known v1 evasion vector, not a safety guarantee.** An
+  inserted `assume(false)` or an early return can neuter an existing test without removing a
+  single line, and this feature will not catch it. Treat it as a prompt for human review, not
+  a substitute for one.
+
+- **Protected paths** (`protectedPathGlobs`) — fires on *any* change (add, modify, delete,
+  rename in or out) to the trust store directory or common tool-config files. A change to an
+  otherwise-inspectable source path that can't be text-diffed (binary-classified) is
+  **fail-closed** — treated as a trigger, since the line-based conditions can't inspect it.
+
+Override `signingConditions` directly to supply a fully custom condition list; override the
+narrower defs above to adjust the built-ins without hand-building conditions.
+
+## Layered enforcement
+
+Signing is checked at three points, with different strictness:
+
+1. **Pre-commit** (`git.checkSigning`) — an *intent* check only: if a condition fires, the
+   commit must have `commit.gpgsign=true` set locally. Git signs a commit *after* pre-commit
+   runs, so this can only confirm the commit is about to be signed — not verify the signature
+   itself.
+2. **Pre-push** (`git.verifyRange --lenient`) — full cryptographic verification of every
+   commit in the push range, but *lenient*: if the trust store isn't configured at all
+   (config drift since the hook was installed), the push passes with a notice instead of
+   failing. Local hooks are feedback, not security — `--no-verify` bypasses them entirely.
+3. **CI / manual `verifyRange`** (strict, the default) — the same verification, but a missing
+   or misconfigured trust store is a hard failure. This — or eventually a server-side
+   pre-receive hook — is the actual enforcement layer.
+
+## Remedies
+
+The rejection message names which of these applies:
+
+| Message | Fix |
+|---|---|
+| Signing not configured (pre-commit, no `commit.gpgsign`) | `git config commit.gpgsign true`, or commit with `-S` |
+| Unsigned (pushed a protected commit with no signature) | Sign it (`git commit --amend -S` / interactive rebase with `-S`) and re-push |
+| Key not in trust root | See **untrusted-contributor workflow** below |
+| Revoked / expired key | Re-sign with a current trusted key |
+| Unverifiable format (SSH-signed) | v1 supports OpenPGP only — see **GPG-only scope** below |
+
+### Untrusted-contributor workflow
+
+A contributor without a trusted key *will* legitimately need to touch a protected pattern.
+"Just add your key to the trust root" is not a self-service fix — it's a protected-path
+change, requiring its own trusted signature from a maintainer. The actual remedy is one of:
+
+- A trusted maintainer checks out the branch and re-signs it (amend or rebase with `-S`
+  using their own trusted key), then pushes.
+- A trusted maintainer countersigns the change before merge.
+
+Trust changes (adding a contributor's key) are a maintainer decision, made separately and
+signed by an already-trusted key.
+
+## History rewriting
+
+`git rebase`, `git commit --amend`, and `pull.rebase` all destroy existing trusted
+signatures — the rewritten commits need re-signing. Where signed history must be preserved,
+update branches by merge rather than rebase.
+
+## Web-flow key warning
+
+Never add a platform's shared web-flow signing key (e.g. GitHub's) to the trust root. Doing
+so collapses attribution to "anyone with push access to the platform," which defeats the
+entire point of per-key trust. `TrustedKeys` refuses known shared platform keys by default;
+loading one requires an explicit `allowKnownPlatformKeys` override.
+
+## Revocation caveat
+
+Revocation is honored only when it's embedded in the armored key material itself, or
+effected by removing the key file from the trust root. There is no keyserver interaction and
+no retroactive history check. A compromised key remains trusted for signatures made until its
+file is actually removed from the trust root — this window is an accepted v1 limitation, not
+something silently glossed over. Rotate and remove compromised keys promptly.
+
+## GPG-only v1 scope
+
+Only OpenPGP (GPG) signatures are verified in v1. SSH-signed commits (`gpg.format=ssh`) pass
+the local pre-commit intent check — a hook can't know the future signature's format — but are
+rejected at verification time with a message naming the limitation. JGit has an SSH
+verification path that isn't wired up here; this is a deliberate deferral, not an oversight,
+and may be revisited if the adopter population proves SSH-dominant.
+
+## CI / remote gate
+
+Local hooks are feedback, not security — `--no-verify` bypasses them, and nothing stops a
+contributor from cloning without ever installing them. The actual enforcement layer is a
+required CI check (this section) or, eventually, a server-side pre-receive hook. A reference
+implementation ships at
+[`githooks/docs/workflows/verify-signing.yml`](workflows/verify-signing.yml); copy it into
+`.github/workflows/` to adopt it.
+
+### What it does, and why
+
+The workflow runs `./mill git.verifyRange <base-sha> <head-sha>` in **strict** mode (no
+`--lenient`) against every commit in a pull request. The one property everything else in the
+file exists to protect: **it always executes code checked out from its own ref** — the
+default branch for a normal `pull_request` trigger — never from the PR being judged. The PR
+itself is pulled in only as raw git history (a plain `git fetch` of its head ref, no working
+tree checkout) so `verifyRange` has commits to walk. This means a PR cannot smuggle in a
+weakened `signingConditions` override, a modified verifier, or a mutated trust store and have
+those changes judge themselves — `build.mill`, the trust store, and the workflow file itself
+are all read from the trusted checkout, including for a PR that edits any of them.
+
+Base and head SHAs come strictly from `github.event.pull_request.{base,head}.sha` (or, for
+the bot-PR path below, from a server-side API lookup) — never from anything a PR or its
+author could otherwise influence. An empty, equal, or unresolvable range fails the job closed
+rather than silently passing.
+
+### Bot PRs (`workflow_dispatch`)
+
+PRs authored with `GITHUB_TOKEN` — this repo's own Scala Steward workflow is one — never fire
+`pull_request` events, so a required `verify-signing` check would simply never run and such
+PRs would become permanently unmergeable. The reference workflow adds a `workflow_dispatch`
+input taking a PR number; the actual base/head SHAs are then resolved via the GitHub API
+*inside the trusted workflow*, not accepted from the dispatch caller, keeping the
+trusted-SHA-only invariant intact for this entry point too. Wiring the dispatch call itself
+(e.g. from the Steward workflow, mirroring how `scala-steward.yml` already dispatches
+`ci.yml`) is part of adopting this workflow, not something the reference file does on its
+own.
+
+### Required branch protection (repo Settings, not YAML)
+
+The workflow file cannot enforce any of this by itself — it has to be configured separately
+wherever it's adopted:
+
+- The check must be marked **required**, with "require branches to be up to date". GitHub's
+  "update branch" button offers a rebase option that destroys trusted signatures on the
+  updated commits — use "update by merge" instead.
+- Direct pushes and force-pushes to the protected branch must be blocked.
+- **Squash-merge and rebase-merge must be disabled**, leaving only "create a merge commit".
+  Both alternatives synthesize a brand-new commit at merge time that is never verified by
+  anything; a real merge commit preserves the verified PR-head commits as-is, and the merge
+  commit itself is exempt from re-triggering conditions via the combined-diff contract (an
+  empty combined diff has nothing left to sign).
+- CODEOWNERS review required on `.mill-signing/`, `build.mill`, and `.github/workflows/` — a
+  PR that edits `verify-signing.yml` itself could otherwise green its own weakened check.
+  CODEOWNERS only adds a review gate, though; where available, GitHub repository rulesets
+  with "require workflows to pass, pinned to a ref" is the stronger fix, since it stops the
+  edited workflow from running at all rather than just flagging it for review.
+
+### Release-flow interaction
+
+A repo whose release automation pushes directly to the protected branch (this repo's `rel`
+module does exactly that) bypasses the PR-based check entirely by construction. Adopting this
+workflow means either moving releases through a PR, or documenting a scoped, governed
+exemption for the release path — not leaving the gap unaddressed.
+
+### Adoption is a separate decision
+
+Everything above describes the *reference* artifact. Turning it on for `mill-plugins`
+itself — populating the trust store, marking the check required, restricting merge
+strategies, migrating Scala Steward off bare `GITHUB_TOKEN` (or wiring the `workflow_dispatch`
+entry point), and resolving the release-flow interaction — is a maintainer decision to make
+separately, after weighing the operational cost against the threat model. This unit ships the
+capability; it does not flip it on.
+
+## Server-side enforcement (pre-receive)
+
+CI is a required check that a fork or a misconfigured client can simply never trigger. For
+self-hosted servers (GitHub Enterprise Server, GitLab self-managed, Gitea, or a bare-repo
+setup), a `pre-receive` hook runs the same verification engine directly against every push,
+with no dependence on CI having run at all.
+
+### What runs
+
+`VerifyMain` is a thin CLI over the same `GitDiff` / `SigningConditions` / `SigningVerify` /
+`TrustedKeys` engine everything else in this document uses — deliberately built with zero
+`mill.*` imports, so the published JAR runs standalone with **no Mill API on the classpath**.
+Deploy it as the repo's `pre-receive` hook via:
+
+```bash
+cs launch com.adtechnacity:mill-githooks_mill1_3:<version> --main-class atn.mill.VerifyMain
+```
+
+Note the single colon before the version — the published artifact's id already carries the
+Scala 3 suffix (`mill-githooks_mill1_3`); `::` would try (and fail) to resolve a nonexistent
+Scala 2.13 artifact.
+
+### Deployment posture
+
+- **Version-pin, and pre-seed the coursier cache at install time.** A `pre-receive` hook that
+  resolves its own classpath from the network on every push is both slow and a fragile trust
+  boundary — pin an exact version and warm the local coursier cache once, out of band, rather
+  than resolving live on each push.
+- **Fail closed.** The wrapper script invoking `cs launch` must treat a launch or resolution
+  failure as a rejected push, never as a silent pass — a coursier hiccup must not be
+  indistinguishable from "nothing to verify."
+- **Network-restricted platforms need a vendored classpath.** GitHub Enterprise Server's
+  `pre-receive` execution environment is deliberately network-isolated, so a live coursier
+  resolve won't work there at all; GitLab server hooks and Gitea custom hooks have their own
+  execution models with similar constraints. The pattern is the same everywhere — resolve the
+  classpath once, ship it alongside the hook, and launch against that local classpath instead
+  of reaching out per push — but the exact packaging mechanics are per-platform; consult each
+  platform's custom/server-hook documentation for the specifics.
+
+### Bootstrap ordering still applies
+
+The same hard prerequisite from **Enablement** above holds here too: the first trusted key
+must land on the trust root *before* this hook is installed, or via a direct admin
+server-side ref update. An empty or missing trust root is only a configuration error for
+pushes that actually contain protected commits — a repo that hasn't adopted signing at all
+(no keys ever committed) is completely unaffected by this hook being installed repo-wide on a
+shared server.
+
+### `trustedKeysDir` overrides do not reach the server
+
+`VerifyMain` always reads trusted keys from `--trust-root-ref`'s tree at a fixed path
+(default `.mill-signing/trusted-keys`, overridable via `--trusted-keys-path`) — it cannot run
+`build.mill`, so a repo's `trustedKeysDir` `def` override is invisible to it. If a repo
+relocates its keys directory, the server-side default (or its mirrored `--trusted-keys-path`
+override) must be kept in sync manually. A path that doesn't exist in the trust-root tree is a
+fail-closed configuration error — never a silent fallback to some other directory.
+
+### Built-ins-only fidelity
+
+A `pre-receive` hook cannot evaluate the pushing repo's `build.mill`, so `VerifyMain` enforces
+the three built-in conditions (`ExceptionComments`, `TestProtection`, `ProtectedPaths`) with
+**default configuration only**. A repo relying on custom `signingConditions` overrides gets
+full fidelity from CI's `verifyRange`, not from the server gate — this divergence is
+deliberate, not an oversight: CI is the full-fidelity required check, and the server hook is
+the layer that closes CI's own bypass gap.
