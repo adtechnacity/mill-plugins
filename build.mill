@@ -133,6 +133,9 @@ object githooks extends MillPluginModule {
   def mvnDeps      = Seq(
     mvn"org.kapunga::fallatol-ollama:0.3.1",
     mvn"org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r",
+    // Version must stay in lockstep with the jgit core dep; brings the BouncyCastle PGP stack
+    // (bcpg/bcprov) used by SigningVerify.
+    mvn"org.eclipse.jgit:org.eclipse.jgit.gpg.bc:7.7.1.202607240634-r",
     mvn"com.lihaoyi::mainargs:0.7.8"
   )
 
