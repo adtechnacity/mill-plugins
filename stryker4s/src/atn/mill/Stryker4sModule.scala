@@ -33,6 +33,21 @@ trait Stryker4sModule extends ScalaModule:
   /** Mutation types to exclude from testing. */
   def strykerExcludedMutations: Seq[String] = Seq.empty
 
+  /**
+   * Source files to exclude from mutation, as globs relative to the workspace root (e.g.
+   * `"libs/data_core/src/atn/data_core/KeyValueStore.scala"`, or `"**\/KeyValueStore.scala"`).
+   *
+   * Stryker4s cannot always produce a compilable mutant: a `StringLiteral` mutant of an `@targetName("...")` argument
+   * collapses two same-erasure overloads, and a very large generated codec can push the enclosing class past the JVM
+   * 64KB limit once per-mutant guards are added. Either aborts the WHOLE module with
+   * `UnableToFixCompilerErrorsException`, and [[strykerExcludedMutations]] is a blunt instrument for it — dropping a
+   * mutator repo-wide to rescue one file can cost most of the mutant pool.
+   *
+   * Excluded patterns are passed through to stryker4s's `mutate` config with a `!` prefix, which its `Glob.matcher`
+   * treats as a negative match.
+   */
+  def strykerExcludedFiles: Seq[String] = Seq.empty
+
   /** Score thresholds for pass/warn/fail. */
   def strykerThresholds: StrykerThresholds = StrykerThresholds()
 
@@ -88,7 +103,8 @@ trait Stryker4sModule extends ScalaModule:
       }
       destSrcDir
     }
-    val mutatePatterns     = mirroredSourceDirs.map(d => d.relativeTo(dest).toString + "/**/*.scala")
+    val mutatePatterns     =
+      StrykerModule.mutatePatterns(mirroredSourceDirs.map(_.relativeTo(dest).toString), strykerExcludedFiles)
 
     // Write stryker4s config with base-dir pointing to Task.dest.
     val javaCwd    = os.Path(java.nio.file.Path.of("").toAbsolutePath)
