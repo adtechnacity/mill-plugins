@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0] - 2026-09-04
+
+### Added
+
+- **stryker4s**: `strykerExcludedFiles` — per-file mutation excludes, passed through to stryker4s's `mutate` config
+  as `!`-prefixed negative globs. Lets a single file that cannot produce a compilable mutant be skipped without
+  dropping a mutator across the whole module, which `strykerExcludedMutations` would.
+
+### Fixed
+
+- **stryker4s**: Scala 2 modules could not be mutation-tested at all. The runner hardcoded the Scala 3 compiler
+  artifact (`scala3-compiler_3`) and its main class (`dotty.tools.dotc.Main`), so a 2.13 module asked coursier for a
+  non-existent `scala3-compiler_3:2.13.16`. Both are now selected from the module's `scalaVersion`.
+
 ## [0.8.0] - 2026-07-29
 
 ### Added
