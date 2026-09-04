@@ -68,16 +68,18 @@ class Stryker4sMillRunner(
     if scalaFiles.nonEmpty then
       logger.info(s"Compiling ${scalaFiles.size} instrumented source file(s)...")
 
-      // Resolve Scala 3 compiler classpath via coursier
+      // Resolve the compiler classpath via coursier. Scala 3 publishes `scala3-compiler_3`, Scala 2 publishes an
+      // unsuffixed `scala-compiler` at the full Scala version — asking for `scala3-compiler_3` at a 2.13.x version
+      // resolves nothing and fails the whole run before any mutant is instrumented.
+      val compilerModule = coursier.Module(
+        coursier.Organization("org.scala-lang"),
+        coursier.ModuleName(StrykerModule.compilerArtifactName(scalaVersion))
+      )
+
       @annotation.nowarn("msg=deprecated")
       val compilerCp = coursier
         .Fetch()
-        .addDependencies(
-          coursier.Dependency(
-            coursier.Module(coursier.Organization("org.scala-lang"), coursier.ModuleName("scala3-compiler_3")),
-            scalaVersion
-          )
-        )
+        .addDependencies(coursier.Dependency(compilerModule, scalaVersion))
         .run()
         .toSeq
         .map(_.getAbsolutePath)
@@ -104,7 +106,7 @@ class Stryker4sMillRunner(
         javaBin.toString,
         "-cp",
         compilerAndLibCp,
-        "dotty.tools.dotc.Main",
+        StrykerModule.compilerMainClass(scalaVersion),
         "-d",
         classDir.toString,
         "-classpath",

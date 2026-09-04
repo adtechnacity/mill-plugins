@@ -35,5 +35,29 @@ object StrykerModule:
     val wrapper = ujson.Obj("stryker4s" -> inner)
     os.write.over(confFile, ujson.write(wrapper, indent = 2))
 
+  /**
+   * The `mutate` patterns for a module: one include glob per mirrored source root, then one `!`-prefixed exclude per
+   * entry in `strykerExcludedFiles`. Stryker4s's `Glob.matcher` partitions on that `!` prefix and treats the remainder
+   * as a negative match, so an excluded file is skipped without dropping a mutator repo-wide.
+   */
+  def mutatePatterns(sourceRoots: Seq[String], excludedFiles: Seq[String]): Seq[String] =
+    sourceRoots.map(_ + "/**/*.scala") ++ excludedFiles.map("!" + _)
+
+  /**
+   * The compiler artifact for a Scala version. Scala 3 publishes `scala3-compiler_3`; Scala 2 publishes an unsuffixed
+   * `scala-compiler`. Asking for `scala3-compiler_3` at a 2.13.x version resolves nothing and aborts the run before any
+   * mutant is instrumented.
+   */
+  def compilerArtifactName(scalaVersion: String): String =
+    if scalaVersion.startsWith("3") then "scala3-compiler_3" else "scala-compiler"
+
+  /**
+   * The compiler entry point for a Scala version: Scala 3 compiles through `dotty.tools.dotc.Main`, Scala 2 through
+   * `scala.tools.nsc.Main`. Paired with [[compilerArtifactName]] - resolving the right jar is not enough if the main
+   * class invoked on it belongs to the other compiler.
+   */
+  def compilerMainClass(scalaVersion: String): String =
+    if scalaVersion.startsWith("3") then "dotty.tools.dotc.Main" else "scala.tools.nsc.Main"
+
   def filterScalacOptions(opts: Seq[String]): Seq[String] =
     opts.filterNot(opt => opt == "-Xfatal-warnings" || opt.contains("unused"))

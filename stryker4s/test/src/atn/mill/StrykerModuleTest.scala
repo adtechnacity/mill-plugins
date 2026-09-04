@@ -58,6 +58,48 @@ object StrykerModuleTest extends TestSuite:
       assert(content("stryker4s")("base-dir").str == tmpDir.toString)
     }
 
+    test("mutatePatterns - one include glob per source root, no excludes by default") {
+      val ps = StrykerModule.mutatePatterns(Seq("libs/data_core/src"), Seq.empty)
+      assert(ps == Seq("libs/data_core/src/**/*.scala"))
+    }
+
+    test("mutatePatterns - excluded files become !-prefixed negative globs after the includes") {
+      val ps = StrykerModule.mutatePatterns(
+        Seq("libs/data_core/src", "libs/data_core/gen"),
+        Seq("libs/data_core/src/atn/data_core/KeyValueStore.scala", "**/Generated.scala")
+      )
+      assert(
+        ps == Seq(
+          "libs/data_core/src/**/*.scala",
+          "libs/data_core/gen/**/*.scala",
+          "!libs/data_core/src/atn/data_core/KeyValueStore.scala",
+          "!**/Generated.scala"
+        )
+      )
+      // stryker4s partitions `mutate` on the `!` prefix, so every exclude must carry exactly one.
+      assert(ps.count(_.startsWith("!")) == 2)
+      assert(!ps.exists(_.startsWith("!!")))
+    }
+
+    test("compilerArtifactName - Scala 3 uses the _3-suffixed artifact") {
+      assert(StrykerModule.compilerArtifactName("3.8.4") == "scala3-compiler_3")
+      assert(StrykerModule.compilerArtifactName("3.3.7") == "scala3-compiler_3")
+    }
+
+    test("compilerArtifactName - Scala 2 uses the unsuffixed artifact") {
+      // `scala3-compiler_3:2.13.16` does not exist; asking for it aborts the run before instrumenting anything.
+      assert(StrykerModule.compilerArtifactName("2.13.16") == "scala-compiler")
+      assert(StrykerModule.compilerArtifactName("2.12.20") == "scala-compiler")
+    }
+
+    test("compilerMainClass - matches the compiler artifact for each Scala major") {
+      // Resolving scala-compiler but invoking dotty.tools.dotc.Main fails with
+      // "Could not find or load main class", so these two must agree.
+      assert(StrykerModule.compilerMainClass("3.8.4") == "dotty.tools.dotc.Main")
+      assert(StrykerModule.compilerMainClass("2.13.16") == "scala.tools.nsc.Main")
+      assert(StrykerModule.compilerArtifactName("2.13.16") == "scala-compiler")
+    }
+
     test("filterScalacOptions - removes fatal warnings and unused") {
       val opts     = Seq("-Xfatal-warnings", "-deprecation", "-Wunused:all", "-Yexplicit-nulls")
       val filtered = StrykerModule.filterScalacOptions(opts)
