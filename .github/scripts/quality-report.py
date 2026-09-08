@@ -5,12 +5,15 @@ Python 3 standard library only (runs on ubuntu-latest without pip).
 
     quality-report.py coverage [--artifact-url URL]
     quality-report.py mutation [MODULE ...] [--artifact-url URL]
-    quality-report.py cpd [--warn N] [--error N]
+    quality-report.py cpd [--report-dir DIR] [--languages LANG ...] [--warn N] [--error N]
     quality-report.py post --section NAME --pr NUMBER     (section markdown on stdin)
     quality-report.py selftest
 
-Every report subcommand prints a markdown section to stdout and appends it to $GITHUB_STEP_SUMMARY when set.
-`post` upserts one section into the single PR comment that starts with the marker below.
+Every report subcommand prints a markdown section to stdout and appends it to $GITHUB_STEP_SUMMARY when set. A section
+spells out its empty state (nothing scanned, nothing changed, report missing) instead of rendering an empty table.
+`post` upserts one section into the single PR comment that starts with the marker below. Jobs post their sections
+concurrently, so `post` merges onto the comment as it is right before writing, then re-reads it and retries when a
+concurrent write dropped the section (see `post_section`).
 """
 
 import argparse
@@ -18,9 +21,11 @@ import csv
 import io
 import json
 import os
+import random
 import re
 import subprocess
 import sys
+import time
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
@@ -29,7 +34,8 @@ MARKER = "<!-- quality-report -->"
 SECTION_ORDER = ("coverage", "mutation", "cpd")
 SECTION_RE = re.compile(r"<!-- section:([\w-]+) -->\n(.*?)\n?<!-- /section:\1 -->", re.S)
 COVERAGE_XML = Path("out/scoverage/xmlReportAll.dest/scoverage.xml")
-CPD_DIR = Path("out/cpd/cpdCheckAll.dest")
+CPD_DIR = Path("out/duplication/cpdCheckAll.dest")
+CPD_LANGUAGES = ("scala", "java")  # CpdSupport's default cpdLanguages; cpdCheckAll writes one cpd-<language>.csv each
 DETECTED = ("Killed", "Timeout")
 UNDETECTED = ("Survived", "NoCoverage")
 OTHER = ("CompileError", "RuntimeError", "Ignored")
@@ -54,6 +60,10 @@ def rate(part, total):
 
 def fmt_rate(value):
     return "n/a" if value is None else f"{value:.1f}%"
+
+
+def plural(count, noun):
+    return f"{count} {noun}" + ("" if count == 1 else "s")
 
 
 def float_or_none(value):
@@ -206,12 +216,18 @@ def newest_report(module):
 def mutation_markdown(module_counts, artifact_url=None):
     """`module_counts` maps each module to its status Counter, or to None when it has no report."""
     if not module_counts:
-        return "### Mutation testing\n\nNo mutation-tested module changed in this PR."
+        return (
+            "### Mutation testing\n\n"
+            "No mutation-tested module changed in this PR: none of its changed `.scala` files lies in a module with a"
+            " `strykerMutate` task, so nothing was mutated."
+        )
     rows = []
     errors = []
+    unreported = []
     for module, counts in module_counts.items():
         if counts is None:
             rows.append((module, "no report", "–", "–", "–", "–", "–"))
+            unreported.append(f"`{module}`")
             continue
         killed = str(counts["Killed"]) + (f" (+{counts['Timeout']} timeout)" if counts["Timeout"] else "")
         rows.append(
@@ -239,6 +255,12 @@ def mutation_markdown(module_counts, artifact_url=None):
     ]
     if errors:
         lines += ["", "Mutants that did not compile or run (not counted): " + "; ".join(errors) + "."]
+    if unreported:
+        lines += [
+            "",
+            f"No report for {', '.join(unreported)}: the module had no `.scala` changes in this PR, or its stryker4s run"
+            " was skipped or failed before writing `report.json` (see the mutation job log).",
+        ]
     return "\n".join(lines)
 
 
@@ -257,7 +279,10 @@ def cmd_mutation(args):
 
 
 def parse_cpd(csv_text):
-    """Rows of a PMD CPD csv report: `lines,tokens,occurrences` then `(line,file)` pairs per occurrence."""
+    """Rows of a PMD CPD csv report: `lines,tokens,occurrences` then `(line,file)` pairs per occurrence.
+
+    `line`/`file` are the first occurrence, `files` every occurrence's file.
+    """
     rows = []
     for record in csv.reader(io.StringIO(csv_text)):
         if not record or not record[0].strip().isdigit():
@@ -269,6 +294,7 @@ def parse_cpd(csv_text):
                 "occurrences": int(record[2]),
                 "line": record[3] if len(record) > 4 else "",
                 "file": record[4] if len(record) > 4 else "",
+                "files": tuple(record[4::2]),
             }
         )
     return rows
@@ -282,49 +308,76 @@ def display_path(path):
         return path
 
 
-def cpd_markdown(reports, warn, error):
-    """`reports` maps a language to its parsed rows."""
-    summary = [
-        (language, sum(r["tokens"] >= warn for r in rows), sum(r["tokens"] >= error for r in rows))
-        for language, rows in sorted(reports.items())
-    ]
-    lines = [
-        "### Copy-paste detection",
-        "",
-        table(("Language", f"≥ {warn} tokens (warn)", f"≥ {error} tokens (error)"), summary, ["---", "---:", "---:"]),
-    ]
-    top = sorted(
-        ((language, r) for language, rows in reports.items() for r in rows), key=lambda x: -x[1]["tokens"]
-    )[:5]
-    if top:
-        rows = [
-            (
-                language,
-                r["tokens"],
-                r["lines"],
-                r["occurrences"],
-                f"`{display_path(r['file'])}:{r['line']}`" if r["file"] else "",
-            )
-            for language, r in top
-        ]
+def cpd_markdown(reports, warn, error, expected=CPD_LANGUAGES, report_dir=CPD_DIR):
+    """`reports` maps each scanned language to its parsed rows; `expected` lists the languages that must have a report.
+
+    The section always opens with a sentence naming what was scanned, the thresholds and the totals, so a clean run
+    reads as "no duplications found" rather than as a table of zeros; the tables only follow when there is a row.
+    """
+    lines = ["### Copy-paste detection", ""]
+    if not reports:
+        expected_csvs = ", ".join(f"`cpd-{language}.csv`" for language in expected) or "`cpd-<language>.csv`"
+        lines.append(
+            f"No CPD report found in `{report_dir}` (expected {expected_csvs}): the CPD step did not run, or failed"
+            " before writing its reports."
+        )
+        return "\n".join(lines)
+    languages = [language for language in expected if language in reports]
+    languages += sorted(language for language in reports if language not in expected)
+    found = [(language, r) for language in languages for r in reports[language]]
+    scanned = (
+        f"Scanned {plural(len(languages), 'language')} ({', '.join(languages)})"
+        f" at ≥ {warn} tokens (warning) / ≥ {error} tokens (error)"
+    )
+    if found:
+        files = {path for _, r in found for path in r["files"]}
+        at_error = sum(r["tokens"] >= error for _, r in found)
+        lines.append(
+            f"{scanned}: **{plural(len(found), 'duplication')}** in {plural(len(files), 'file')},"
+            f" {at_error or 'none'} at the error tier."
+        )
+    else:
+        lines.append(f"{scanned}: **no duplications found**.")
+    missing = [language for language in expected if language not in reports]
+    if missing:
+        csvs = ", ".join(f"`cpd-{language}.csv`" for language in missing)
         lines += [
             "",
-            "Largest duplications:",
-            "",
-            table(("Language", "Tokens", "Lines", "Occurrences", "First location"), rows, ["---", "---:", "---:", "---:", "---"]),
+            f"Missing report for {', '.join(missing)} ({csvs} not in `{report_dir}`): CPD did not run to completion for"
+            f" {'it' if len(missing) == 1 else 'them'}.",
         ]
+    if not found:
+        return "\n".join(lines)
+    summary = [
+        (language, sum(r["tokens"] >= warn for r in reports[language]), sum(r["tokens"] >= error for r in reports[language]))
+        for language in languages
+    ]
+    top = [
+        (
+            language,
+            r["tokens"],
+            r["lines"],
+            r["occurrences"],
+            f"`{display_path(r['file'])}:{r['line']}`" if r["file"] else "",
+        )
+        for language, r in sorted(found, key=lambda x: -x[1]["tokens"])[:5]
+    ]
+    lines += [
+        "",
+        table(("Language", f"≥ {warn} tokens (warn)", f"≥ {error} tokens (error)"), summary, ["---", "---:", "---:"]),
+        "",
+        "Largest duplications:",
+        "",
+        table(("Language", "Tokens", "Lines", "Occurrences", "First location"), top, ["---", "---:", "---:", "---:", "---"]),
+    ]
     return "\n".join(lines)
 
 
 def cmd_cpd(args):
     report_dir = Path(args.report_dir)
-    if not report_dir.is_dir():
-        emit("### Copy-paste detection\n\nCPD not enabled in CI yet (arrives once `mill-cpd` is released and dogfooded).")
-        return 0
-    reports = {
-        path.stem[len("cpd-"):]: parse_cpd(path.read_text(encoding="utf-8")) for path in sorted(report_dir.glob("cpd-*.csv"))
-    }
-    emit(cpd_markdown(reports, args.warn, args.error))
+    paths = sorted(report_dir.glob("cpd-*.csv")) if report_dir.is_dir() else []
+    reports = {path.stem[len("cpd-"):]: parse_cpd(path.read_text(encoding="utf-8")) for path in paths}
+    emit(cpd_markdown(reports, args.warn, args.error, args.languages, args.report_dir))
     return 0
 
 
@@ -332,7 +385,7 @@ def cmd_cpd(args):
 
 
 def parse_sections(body):
-    return {name: content.strip() for name, content in SECTION_RE.findall(body or "")}
+    return {name: content.strip() for name, content in SECTION_RE.findall((body or "").replace("\r\n", "\n"))}
 
 
 def render_body(sections, sha):
@@ -367,6 +420,66 @@ def parse_json_stream(text):
         items.extend(doc if isinstance(doc, list) else [doc])
 
 
+class CommentApi:
+    """The sticky-comment calls on one pull request, through `gh api`; selftest substitutes an in-memory fake."""
+
+    def __init__(self, repo, pr):
+        self.repo, self.pr = repo, pr
+
+    def fetch(self):
+        """The oldest comment starting with MARKER (the canonical sticky comment), or None."""
+        comments = parse_json_stream(gh("api", f"repos/{self.repo}/issues/{self.pr}/comments", "--paginate"))
+        sticky = [c for c in comments if str(c.get("body", "")).startswith(MARKER)]
+        return min(sticky, key=lambda c: c["id"], default=None)
+
+    def create(self, body):
+        payload = json.dumps({"body": body})
+        return json.loads(gh("api", "-X", "POST", f"repos/{self.repo}/issues/{self.pr}/comments", "--input", "-", stdin=payload))
+
+    def update(self, comment_id, body):
+        payload = json.dumps({"body": body})
+        gh("api", "-X", "PATCH", f"repos/{self.repo}/issues/comments/{comment_id}", "--input", "-", stdin=payload)
+
+    def delete(self, comment_id):
+        gh("api", "-X", "DELETE", f"repos/{self.repo}/issues/comments/{comment_id}")
+
+
+def random_sleep():
+    time.sleep(random.uniform(0.5, 2.0))
+
+
+def post_section(api, section, content, sha, attempts=5, sleep=random_sleep, log=lambda message: None):
+    """Merge one section into the sticky comment and make sure it lands despite concurrent posts from other jobs.
+
+    The build and mutation jobs post different sections at the same time, each with a read-modify-write of the same
+    comment. Every attempt therefore fetches the comment and merges onto that body right before writing, then fetches
+    again and checks that the section is present with the content it wrote. A job that fetched before our write and
+    wrote after it drops our section (a lost update); the check catches that and the next attempt merges onto the
+    other job's body, which keeps its section. Two jobs creating the comment at once leave two comments: the oldest is
+    canonical, so a duplicate of ours is deleted and the section merged into the older one on the next attempt.
+    Returns True once verified, False after `attempts` failed rounds.
+    """
+    want = content.strip()
+    for attempt in range(1, attempts + 1):
+        existing = api.fetch()
+        body = upsert_section(existing["body"] if existing else None, section, want, sha)
+        created = None
+        if existing:
+            api.update(existing["id"], body)
+        else:
+            created = api.create(body)
+        after = api.fetch()
+        if created and after and after["id"] != created["id"]:
+            api.delete(created["id"])
+            log(f"attempt {attempt}: another job created the comment first; merging the {section} section into it")
+        elif after and parse_sections(after["body"]).get(section) == want:
+            return True
+        else:
+            log(f"attempt {attempt}: the {section} section was overwritten by a concurrent update; retrying")
+        sleep()
+    return False
+
+
 def cmd_post(args):
     content = sys.stdin.read()
     repo = os.environ.get("GITHUB_REPOSITORY")
@@ -375,17 +488,14 @@ def cmd_post(args):
         print("::warning::GITHUB_REPOSITORY is not set; nothing posted", file=sys.stderr)
         return 0
     try:
-        comments = parse_json_stream(gh("api", f"repos/{repo}/issues/{args.pr}/comments", "--paginate"))
-        existing = next((c for c in comments if str(c.get("body", "")).startswith(MARKER)), None)
-        body = upsert_section(existing["body"] if existing else None, args.section, content, sha)
-        payload = json.dumps({"body": body})
-        if existing:
-            gh("api", "-X", "PATCH", f"repos/{repo}/issues/comments/{existing['id']}", "--input", "-", stdin=payload)
-        else:
-            gh("api", "-X", "POST", f"repos/{repo}/issues/{args.pr}/comments", "--input", "-", stdin=payload)
+        api = CommentApi(repo, args.pr)
+        verified = post_section(api, args.section, content, sha, log=lambda message: print(message, file=sys.stderr))
     except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as exc:
         detail = (getattr(exc, "stderr", None) or str(exc)).strip()
         print(f"::warning::could not post the {args.section} section to PR #{args.pr}: {detail}", file=sys.stderr)
+        return 0
+    if not verified:
+        print(f"::warning::the {args.section} section did not land on PR #{args.pr}; giving up", file=sys.stderr)
         return 0
     print(f"posted the {args.section} section to PR #{args.pr}", file=sys.stderr)
     return 0
@@ -436,6 +546,47 @@ CPD_FIXTURE = """lines,tokens,occurrences
 """
 
 
+class FakeComments:
+    """In-memory stand-in for CommentApi.
+
+    `before_write` and `after_write` are queues of callables; each write pops and runs one of each, which is how a
+    test slips another job's request in exactly where a real race would put it.
+    """
+
+    def __init__(self):
+        self.comments, self.next_id, self.writes = {}, 1, 0
+        self.before_write, self.after_write = [], []
+
+    def _around(self, write):
+        if self.before_write:
+            self.before_write.pop(0)()
+        write()
+        self.writes += 1
+        if self.after_write:
+            self.after_write.pop(0)()
+
+    def fetch(self):
+        sticky = [dict(c) for c in self.comments.values() if c["body"].startswith(MARKER)]
+        return min(sticky, key=lambda c: c["id"], default=None)
+
+    def create(self, body):
+        created = {}
+
+        def write():
+            created.update(id=self.next_id, body=body)
+            self.next_id += 1
+            self.comments[created["id"]] = dict(created)
+
+        self._around(write)
+        return dict(created)
+
+    def update(self, comment_id, body):
+        self._around(lambda: self.comments[comment_id].update(body=body))
+
+    def delete(self, comment_id):
+        del self.comments[comment_id]
+
+
 def check(condition, message):
     if not condition:
         raise SystemExit(f"selftest failed: {message}")
@@ -469,15 +620,36 @@ def cmd_selftest(_args):
     check("| devx | 70.0% | 6 (+1 timeout) | 2 | 1 | 1 | [mutation-html](https://example.test/artifact) |" in md, "row")
     check("devx: 1 compile error(s), 1 runtime error(s)" in md, "error footnote")
     check("| cpd | no report |" in md, "missing report row")
+    check("No report for `cpd`: the module had no `.scala` changes in this PR, or" in md, "missing report explained")
     check("| m | 75.0% | 3 | 1 | 0 | 0 |" in mutation_markdown({"m": Counter(Killed=3, Survived=1)}), "plain killed count")
-    check("No mutation-tested module changed in this PR." in mutation_markdown({}), "empty module list")
+    md = mutation_markdown({})
+    check("No mutation-tested module changed in this PR: none of its changed `.scala` files" in md, "empty module list")
+    check("|" not in md and "No report for" not in md, "empty module list renders neither a table nor a missing-report note")
 
     rows = parse_cpd(CPD_FIXTURE)
     check([r["tokens"] for r in rows] == [80, 30, 20], "cpd rows")
     check(rows[0]["file"] == "/ws/a/src/A.scala" and rows[0]["line"] == "10", "cpd first location")
-    md = cpd_markdown({"scala": rows}, warn=25, error=75)
-    check("| scala | 2 | 1 |" in md, "cpd threshold counts")
+    check(rows[1]["files"] == ("/ws/a/src/C.scala", "/ws/a/src/D.scala", "/ws/a/src/E.scala"), "cpd all occurrence files")
+    md = cpd_markdown({"java": [], "scala": rows}, warn=25, error=75)
+    check(
+        "Scanned 2 languages (scala, java) at ≥ 25 tokens (warning) / ≥ 75 tokens (error):"
+        " **3 duplications** in 7 files, 1 at the error tier." in md,
+        "cpd summary sentence",
+    )
+    check("| scala | 2 | 1 |" in md and "| java | 0 | 0 |" in md, "cpd threshold counts")
     check(md.index("`/ws/a/src/A.scala:10`") < md.index("`/ws/a/src/C.scala:1`"), "top rows sorted by tokens")
+    check("none at the error tier" in cpd_markdown({"scala": rows[1:]}, warn=25, error=75), "no error-tier duplication")
+    clean = cpd_markdown({"scala": [], "java": []}, warn=25, error=75)
+    check(
+        clean == "### Copy-paste detection\n\nScanned 2 languages (scala, java) at ≥ 25 tokens (warning)"
+        " / ≥ 75 tokens (error): **no duplications found**.",
+        f"clean cpd state is one sentence and no table:\n{clean}",
+    )
+    md = cpd_markdown({"scala": []}, warn=25, error=75, report_dir="out/x")
+    check("Scanned 1 language (scala) at" in md, "singular language")
+    check("Missing report for java (`cpd-java.csv` not in `out/x`): CPD did not run to completion for it." in md, "missing csv")
+    md = cpd_markdown({}, warn=25, error=75, report_dir="out/x")
+    check("No CPD report found in `out/x` (expected `cpd-scala.csv`, `cpd-java.csv`)" in md and "|" not in md, "no cpd reports")
 
     body = upsert_section(None, "coverage", "### Coverage\n\nstuff", "sha1")
     check(body.startswith(MARKER + "\n## Quality report\n\nCommit: sha1\n"), "new comment header")
@@ -490,6 +662,52 @@ def cmd_selftest(_args):
     check(body.index("section:coverage") < body.index("section:mutation"), "section order is stable")
     check(body.count(MARKER) == 1, "single marker")
     check(parse_json_stream('[{"id": 1}]\n[{"id": 2}]') == [{"id": 1}, {"id": 2}], "paginated json stream")
+    check(parse_sections("<!-- section:a -->\r\nx\r\n<!-- /section:a -->") == {"a": "x"}, "crlf body")
+
+    # The merge is pure: the build job's cpd section and the mutation job's section, merged one after the other
+    # in either order, both survive.
+    cpd_md, mut_md, cov_md = "### CPD\n\nclean", "### Mutation\n\nnone", "### Coverage\n\nc"
+    both = {"cpd": cpd_md, "mutation": mut_md}
+    check(parse_sections(upsert_section(upsert_section(None, "cpd", cpd_md, "s1"), "mutation", mut_md, "s2")) == both, "merge b,m")
+    check(parse_sections(upsert_section(upsert_section(None, "mutation", mut_md, "s1"), "cpd", cpd_md, "s2")) == both, "merge m,b")
+
+    # No contention: one write, verified on the first attempt.
+    api, log = FakeComments(), []
+    check(post_section(api, "cpd", cpd_md, "sha-c", sleep=lambda: None, log=log.append), "clean post verified")
+    check(api.writes == 1 and not log and parse_sections(api.fetch()["body"]) == {"cpd": cpd_md}, "clean post: one write")
+
+    # Lost update: the mutation job fetched the comment before our PATCH, and its PATCH (merged onto that stale body)
+    # lands right after ours, dropping the cpd section. The verify step notices and the retry merges onto the
+    # mutation job's body, so both sections end up present.
+    api, log = FakeComments(), []
+    api.create(render_body({"coverage": cov_md}, "sha0"))
+    stale = api.fetch()
+    api.writes = 0  # the setup create above is not part of the race
+    api.after_write.append(lambda: api.update(stale["id"], upsert_section(stale["body"], "mutation", mut_md, "sha-m")))
+    check(post_section(api, "cpd", cpd_md, "sha-c", sleep=lambda: None, log=log.append), "post verified after a lost update")
+    final = api.fetch()["body"]
+    check(parse_sections(final) == {"coverage": cov_md, "mutation": mut_md, "cpd": cpd_md}, f"lost update repaired:\n{final}")
+    check(api.writes == 3 and len(log) == 1 and "overwritten" in log[0], f"exactly one retry: writes={api.writes} log={log}")
+    check("Commit: sha-c" in final and len(api.comments) == 1, "newest post's commit line wins, still one comment")
+
+    # Create race: both jobs saw no comment and POSTed; the older comment is canonical, so our duplicate is deleted
+    # and our section merged into the older one.
+    api, log = FakeComments(), []
+    api.before_write.append(lambda: api.create(render_body({"mutation": mut_md}, "sha-m")))
+    check(post_section(api, "cpd", cpd_md, "sha-c", sleep=lambda: None, log=log.append), "post verified after a create race")
+    check(len(api.comments) == 1 and parse_sections(api.fetch()["body"]) == both, "duplicate deleted, both sections kept")
+    check(len(log) == 1 and "created the comment first" in log[0], f"create race logged once: {log}")
+
+    # Every write clobbered: gives up after `attempts` rounds and reports it, leaving the comment intact.
+    api, log = FakeComments(), []
+    api.create(render_body({"coverage": cov_md}, "sha0"))
+
+    def clobber():  # another job overwrites the comment behind our back, without our section
+        api.comments[api.fetch()["id"]]["body"] = render_body({"coverage": cov_md}, "sha-x")
+
+    api.after_write.extend([clobber] * 3)
+    check(not post_section(api, "cpd", cpd_md, "sha-c", attempts=3, sleep=lambda: None, log=log.append), "gives up")
+    check(len(log) == 3 and parse_sections(api.fetch()["body"]) == {"coverage": cov_md}, "bounded attempts")
     print("selftest ok")
     return 0
 
@@ -512,11 +730,18 @@ def main(argv=None):
 
     p = sub.add_parser("cpd", help="CPD summary from <report-dir>/cpd-*.csv")
     p.add_argument("--report-dir", default=str(CPD_DIR), help=f"cpdCheckAll dest dir (default {CPD_DIR})")
+    p.add_argument(
+        "--languages",
+        nargs="*",
+        default=list(CPD_LANGUAGES),
+        metavar="LANG",
+        help="languages cpdCheckAll scans, one cpd-<lang>.csv each (default: CpdSupport's cpdLanguages, scala java)",
+    )
     p.add_argument("--warn", type=int, default=25, help="warning token threshold (default 25)")
     p.add_argument("--error", type=int, default=75, help="error token threshold (default 75)")
     p.set_defaults(func=cmd_cpd)
 
-    p = sub.add_parser("post", help="upsert the section read from stdin into the sticky PR comment")
+    p = sub.add_parser("post", help="upsert the section read from stdin into the sticky PR comment (verified, retried)")
     p.add_argument("--section", required=True, help="section name, e.g. coverage")
     p.add_argument("--pr", required=True, type=int, help="pull request number")
     p.set_defaults(func=cmd_post)
