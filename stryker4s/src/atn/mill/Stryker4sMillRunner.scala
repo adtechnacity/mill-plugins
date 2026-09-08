@@ -30,6 +30,9 @@ import scala.concurrent.duration.FiniteDuration
  *   number of parallel test runners
  * @param testRunnerEnv
  *   environment added to the forked testrunner processes (the test module's `forkEnv`)
+ * @param testRunnerLogDir
+ *   where the forked testrunner processes write their output; defaults to stryker4s's tmp dir, which it deletes at the
+ *   end of the run (see [[MillProcessTestRunner.processSpec]] for why a directory that outlives the run is better)
  */
 class Stryker4sMillRunner(
   testClasspath: Seq[os.Path],
@@ -40,7 +43,8 @@ class Stryker4sMillRunner(
   moduleSourceDirs: Seq[os.Path],
   scalacOptions: Seq[String] = Seq.empty,
   testRunnerJavaOpts: Seq[String] = Seq.empty,
-  testRunnerEnv: Map[String, String] = Map.empty
+  testRunnerEnv: Map[String, String] = Map.empty,
+  testRunnerLogDir: Option[os.Path] = None
 )(using logger: Logger)
     extends Stryker4sRunner:
 
@@ -86,7 +90,8 @@ class Stryker4sMillRunner(
           javaOpts = testRunnerJavaOpts,
           env = testRunnerEnv,
           testGroups = testGroups,
-          workingDir = sourceDir
+          workingDir = sourceDir,
+          logDir = testRunnerLogDir.getOrElse(sourceDir)
         )
         TestRunner.retryRunner(TestRunner.timeoutRunner(sharedTimeout, process))
       }.toList
