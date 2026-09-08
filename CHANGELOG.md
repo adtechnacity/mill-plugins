@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.0] - 2026-09-08
+
+### Added
+
+- **stryker4s**: strykerIncludedFiles for file-level mutation scope
+- **stryker4s**: per-mutant compiler error reporting
+
+### Fixed
+
+- **stryker4s**: keep testrunner logs out of the stryker tmp dir
+- **stryker4s**: forward forkEnv and forkArgs to the testrunner
+
+### Changed
+
+- remove the duplications CPD flagged and use the default CPD thresholds
+
+### Other
+
+- dogfood mill-cpd 1.0.0 and post a CPD section on pull requests
+- coverage, mutation-delta and example runs with a sticky PR quality report
+- set next development version 1.0.1-SNAPSHOT
+
 ## [1.0.0] - 2026-09-08
 
 ### Breaking Changes
