@@ -88,10 +88,16 @@ trait MillPluginMutation extends Stryker4sModule {
 
   // Two mutators produce mutants that os-lib rejects at compile time: MethodExpression turns `os.exists(p)` into
   // `os.forall(p)` (no such member) and StringLiteral turns `dir / "name"` into `dir / ""` (the path-segment macro
-  // fails on an empty literal). Rolling back just those mutants needs the per-line compiler errors of the 1.1.0 runner
-  // and stryker4s-core 0.21.0 (stryker-mutator/stryker4s#2011: the 0.20.x RollbackHandler re-parsed a comment-stripped
-  // copy of the file, so the reported lines matched the wrong mutants); the published runner this build pins still
-  // embeds 0.20.4. TODO drop after the pin bump to the release containing stryker4s-core 0.21.0. Intended final config:
+  // fails on an empty literal). The 1.1.0 runner reports one CompilerErrMsg per scalac error, but stryker4s 0.20.4
+  // matches its line against a re-parse of `mutatedSource.syntax` (comments stripped) while the file scalac compiled
+  // was printed with `printSyntaxFor` (comments kept), so every comment line above the mutant shifts the match onto
+  // the wrong mutation switch: the wrong mutants are rolled back, the single retry hits the same error and the module
+  // aborts (UnableToFixCompilerErrorsException). Seen with mutant 6 of cpd/src/atn/mill/CpdSupport.scala (StringLiteral
+  // on `Task.dest / s"cpd-$language.csv"`, 24 comment lines above it) and a `/ ""` mutant in
+  // devx/src/atn/mill/DeveloperExperience.scala. Upstream stryker-mutator/stryker4s#2011, fixed in stryker4s-core
+  // 0.21.0 (this module now builds against it), but the published runner this build pins still embeds 0.20.4, so the
+  // mutators stay excluded rather than the files. TODO drop after the pin bump to the release containing
+  // stryker4s-core 0.21.0. Intended final config:
   //   - no exclusion here: MethodExpression mutants roll back on their own;
   //   - on `devx` only, `override def strykerExcludedMutations = Seq("StringLiteral")`: scalac reports one
   //     macro-expansion error per compile, so its `os.Path / ""` mutants cannot all be rolled back in the one retry
@@ -99,9 +105,9 @@ trait MillPluginMutation extends Stryker4sModule {
   override def strykerExcludedMutations = Seq("MethodExpression", "StringLiteral")
 
   // File-level delta: CI exports STRYKER_INCLUDED_FILES (comma-separated, relative to the workspace root) so a PR
-  // only mutates the files it touched. `strykerIncludedFiles` ships with 1.1.0.
-  // TODO re-enable after the 1.1.0 pin bump:
-  // override def strykerIncludedFiles = Task.Input(Task.env.get("STRYKER_INCLUDED_FILES").toSeq.flatMap(_.split(',')))
+  // only mutates the files it touched; unset or empty, the whole module is mutated.
+  override def strykerIncludedFiles: T[Seq[String]] =
+    Task.Input(Task.env.get("STRYKER_INCLUDED_FILES").toSeq.flatMap(_.split(',')).map(_.trim).filter(_.nonEmpty))
 }
 
 /** Aggregated coverage over every plugin module: `./mill scoverage.htmlReportAll` / `scoverage.xmlReportAll`. */
@@ -267,15 +273,13 @@ object devx extends MillPluginModule with MillPluginMutation {
   }
 }
 
-// No MillPluginMutation: the tests read MILL_TEST_RESOURCE_DIR, which the 1.0.0 stryker runner does not forward
-// (it ignores the test module's forkEnv), so the initial test run fails before any mutant is tried.
-// TODO re-enable after the 1.1.0 pin bump (forkEnv forwarding ships with it): `with MillPluginMutation` +
-// `def strykerTestModule = test`.
-object cpd extends MillPluginModule {
+object cpd extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-cpd_mill1"
 
   // First released in 1.0.0, so that is the baseline rather than the repo-wide 0.3.0.
   override def mimaPreviousVersions = Seq("1.0.0")
+
+  def strykerTestModule = test
 
   object test    extends MillPluginTests {
     // The unit tests drive UnitTester over the example workspace.

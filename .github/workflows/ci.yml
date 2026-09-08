@@ -11,6 +11,10 @@ on:
 
 # pull-requests: write lets the quality-report script maintain its sticky PR
 # comment. Fork PRs get a read-only token; the script then only warns.
+# The build and mutation jobs post their sections into that one comment
+# concurrently: `post` merges onto the freshly fetched body, re-reads the
+# comment and retries when a concurrent write dropped its section, so
+# neither job waits for the other.
 permissions:
   contents: read
   pull-requests: write
@@ -57,15 +61,17 @@ jobs:
       - name: CPD
         run: ./mill duplication
 
-      # The thresholds must match `object duplication` in build.mill, which uses CpdSupport's defaults
-      # (cpdMinimumTokens / cpdErrorTokens are plain defs, not tasks, so they cannot be read through `./mill show`).
+      # The thresholds and languages must match `object duplication` in build.mill, which uses CpdSupport's defaults
+      # (cpdMinimumTokens / cpdErrorTokens / cpdLanguages are plain defs, not tasks, so `./mill show` cannot read them).
+      # Runs after a failed CPD step too: the section then lists the duplications, or says which report is missing.
       - name: Post CPD
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          python3 .github/scripts/quality-report.py cpd --report-dir out/duplication/cpdCheckAll.dest --warn 25 --error 75 \
+          python3 .github/scripts/quality-report.py cpd --report-dir out/duplication/cpdCheckAll.dest \
+            --languages scala java --warn 25 --error 75 \
             | python3 .github/scripts/quality-report.py post --section cpd --pr ${{ github.event.pull_request.number }}
 
       # Example workspaces run a forked Mill against the locally published plugins (~5 min).
@@ -141,8 +147,8 @@ jobs:
           echo "files=$(paste -sd, <<<"$files")" >> "$GITHUB_OUTPUT"
 
       # strykerMutate is an exclusive command, so modules run one after another. STRYKER_INCLUDED_FILES carries the
-      # PR's changed .scala files for the file-level delta; the published runner ignores it until the
-      # mill-stryker4s pin moves to 1.1.0 and the strykerIncludedFiles override in build.mill is activated.
+      # PR's changed .scala files for the file-level delta (the strykerIncludedFiles override in build.mill reads it;
+      # each module only picks up the entries under its own source roots). Left empty, a module is mutated whole.
       - name: Mutation testing
         if: steps.changed.outputs.modules != ''
         continue-on-error: false
