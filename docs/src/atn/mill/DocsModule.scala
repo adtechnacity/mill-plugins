@@ -70,19 +70,23 @@ trait DocsModule extends DefaultTaskModule {
 
   /** Generate unified scaladoc site for local browsing. */
   def local: T[PathRef] = Task {
-    val dest = Task.dest / "site"
-    os.makeDir.all(dest)
-    runScaladoc(dest, classDirs(), classpath(), docCp(), docVersion(), preparedSiteRoot().path)
-    PathRef(dest)
+    generateSite(Seq.empty)()(Task.dest / "site")
   }
 
   def defaultTask(): String = "local"
 
   /** Generate unified scaladoc site for deployment with source links. */
   def site: T[PathRef] = Task {
-    val dest = Task.dest / "site"
+    generateSite(sourceLinks)()(Task.dest / "site")
+  }
+
+  /**
+   * The scaladoc invocation shared by [[local]] and [[site]] with its inputs resolved; the returned function writes the
+   * site into the caller's directory (an anonymous task has no `Task.dest` of its own).
+   */
+  private def generateSite(extraOpts: Seq[String]) = Task.Anon { (dest: os.Path) =>
     os.makeDir.all(dest)
-    runScaladoc(dest, classDirs(), classpath(), docCp(), docVersion(), preparedSiteRoot().path, sourceLinks)
+    runScaladoc(dest, classDirs(), classpath(), docCp(), docVersion(), preparedSiteRoot().path, extraOpts)
     PathRef(dest)
   }
 

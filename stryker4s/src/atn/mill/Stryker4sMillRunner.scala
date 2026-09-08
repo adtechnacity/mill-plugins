@@ -84,15 +84,16 @@ class Stryker4sMillRunner(
       // Shared across runners: set once from the initial run's duration, read by every timeoutRunner.
       val sharedTimeout = Deferred.unsafe[IO, FiniteDuration]
 
+      val server = MillProcessTestRunner.ServerConfig(
+        classpath = runnerClasspath,
+        javaOpts = testRunnerJavaOpts,
+        env = testRunnerEnv,
+        workingDir = sourceDir,
+        logDir = testRunnerLogDir.getOrElse(sourceDir)
+      )
+
       val runners = (1 to concurrency).map { _ =>
-        val process = MillProcessTestRunner.newProcess(
-          classpath = runnerClasspath,
-          javaOpts = testRunnerJavaOpts,
-          env = testRunnerEnv,
-          testGroups = testGroups,
-          workingDir = sourceDir,
-          logDir = testRunnerLogDir.getOrElse(sourceDir)
-        )
+        val process = MillProcessTestRunner.newProcess(server, testGroups)
         TestRunner.retryRunner(TestRunner.timeoutRunner(sharedTimeout, process))
       }.toList
       NonEmptyList.fromListUnsafe(runners)
@@ -130,10 +131,9 @@ class Stryker4sMillRunner(
 
     // Instrumented sources reference stryker4s.coverage.coverMutant / stryker4s.activeMutation — the testrunner
     // artifact must be on the compile classpath too.
-    val compileCp        =
-      (testRunnerCp.map(_.toString) ++ testClasspath.map(_.toString)).mkString(java.io.File.pathSeparator)
-    val compilerAndLibCp = (compilerCp ++ testRunnerCp.map(_.toString) ++ testClasspath.map(_.toString))
-      .mkString(java.io.File.pathSeparator)
+    val runtimeCp        = (testRunnerCp ++ testClasspath).map(_.toString)
+    val compileCp        = runtimeCp.mkString(java.io.File.pathSeparator)
+    val compilerAndLibCp = (compilerCp ++ runtimeCp).mkString(java.io.File.pathSeparator)
 
     // Filter scalac options: keep language/source settings, drop fatal warnings and plugin paths
     val filteredScalacOpts = scalacOptions.filterNot { opt =>

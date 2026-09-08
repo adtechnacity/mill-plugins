@@ -47,6 +47,9 @@ trait MillPluginModule extends ScalaModule with PublishModule with Mima with Sco
     def mvnDeps       = Seq(mvn"com.lihaoyi::utest:0.9.5", mvn"com.lihaoyi::mill-testkit:$millVersion")
     def testFramework = "utest.runner.Framework"
 
+    // One ExampleTests source for every example module: it runs whatever workspace sits under its resources.
+    def sources = Task.Sources(build.moduleDir / "example-tests" / "src")
+
     def pluginArtifacts: T[Seq[(mill.scalalib.publish.Artifact, os.Path, os.Path)]] = Task {
       Task.traverse(pluginModules) { m =>
         Task.Anon {
@@ -111,10 +114,6 @@ object scoverage extends ScoverageReport {
  */
 object duplication extends CpdSupport {
   def cpdRootModule = ModuleRef(build)
-
-  // Ratchet: the largest duplication today is 106 tokens (ScalafixSupport.scala:49 / :66), so this is the smallest
-  // error tier the workspace passes. Lower it (towards the 75 default) once that block is deduplicated.
-  override def cpdErrorTokens = 107
 }
 
 object core extends MillPluginModule {

@@ -67,28 +67,35 @@ trait ReleaseModule extends DefaultTaskModule:
 
   /** Generate changelog for unreleased commits and write to CHANGELOG.md. */
   def changelog() = Task.Command[String] {
-    val commits  = unreleasedCommits()
-    val version  = os.read(versionFile).trim
-    val date     = java.time.LocalDate.now().toString
-    val section  = ChangelogGenerator.generate(version, date, commits, typeMapping)
-    val existing = Option.when(os.exists(changelogFile))(os.read(changelogFile))
-    val content  = ChangelogGenerator.updateFile(existing, section)
-    os.write.over(changelogFile, content)
+    val commits = unreleasedCommits()
+    val version = currentVersion
+    val content = writeChangelog(changelogSection(version, commits))
     Task.log.info(s"Wrote changelog for $version (${commits.size} commits)")
     content
   }
 
   /** Preview unreleased changelog without writing any file. */
   def unreleased() = Task.Command[String] {
-    val commits = unreleasedCommits()
-    val version = os.read(versionFile).trim
-    val date    = java.time.LocalDate.now().toString
-    val section = ChangelogGenerator.generate(version, date, commits, typeMapping)
+    val section = changelogSection(currentVersion, unreleasedCommits())
     Task.log.info(section)
     section
   }
 
   override def defaultTask(): String = "release"
+
+  /** The version file's content. */
+  private def currentVersion: String = os.read(versionFile).trim
+
+  /** The changelog section for `commits` under `version`, dated today. */
+  private def changelogSection(version: String, commits: List[ConventionalCommit]): String =
+    ChangelogGenerator.generate(version, java.time.LocalDate.now().toString, commits, typeMapping)
+
+  /** Merge `section` into the changelog file and return its new content. */
+  private def writeChangelog(section: String): String =
+    val existing = Option.when(os.exists(changelogFile))(os.read(changelogFile))
+    val content  = ChangelogGenerator.updateFile(existing, section)
+    os.write.over(changelogFile, content)
+    content
 
   /** Infer bump type from conventional commits: breaking → major, feat → minor, else → patch. */
   private def inferBump(commits: List[ConventionalCommit]): String =
@@ -120,12 +127,8 @@ trait ReleaseModule extends DefaultTaskModule:
     os.write.over(versionFile, releaseVersion.release.getBytes)
 
     // 3. Generate changelog
-    val commits  = unreleasedCommits()
-    val date     = java.time.LocalDate.now().toString
-    val section  = ChangelogGenerator.generate(releaseVersion.release, date, commits, typeMapping)
-    val existing = Option.when(os.exists(changelogFile))(os.read(changelogFile))
-    val content  = ChangelogGenerator.updateFile(existing, section)
-    os.write.over(changelogFile, content.getBytes)
+    val commits = unreleasedCommits()
+    writeChangelog(changelogSection(releaseVersion.release, commits))
 
     // 4. Commit and tag
     val repoRoot         = repo.getWorkTree.toPath

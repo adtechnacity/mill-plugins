@@ -78,19 +78,13 @@ object CodeScene {
   private def get(path: String): ujson.Value =
     ujson.read(requests.get(url = s"$api$path", headers = headers).text())
 
-  private def post(path: String, body: ujson.Value): ujson.Value =
-    ujson.read(
-      requests
-        .post(url = s"$api$path", headers = headers + JsonContent, data = ujson.write(body))
-        .text()
-    )
+  /** A JSON request through `send` (`requests.post` or `requests.put`) with `body` encoded and the JSON headers. */
+  private def sendJson(send: requests.Requester, path: String, body: ujson.Value): ujson.Value =
+    ujson.read(send(url = s"$api$path", headers = headers + JsonContent, data = ujson.write(body)).text())
 
-  private def put(path: String, body: ujson.Value): ujson.Value =
-    ujson.read(
-      requests
-        .put(url = s"$api$path", headers = headers + JsonContent, data = ujson.write(body))
-        .text()
-    )
+  private def post(path: String, body: ujson.Value): ujson.Value = sendJson(requests.post, path, body)
+
+  private def put(path: String, body: ujson.Value): ujson.Value = sendJson(requests.put, path, body)
 
   private def devSettingPath(devSettingId: Int): String = s"$DevSettings/$devSettingId"
   private def projectPath(projectId: Int): String       = s"$Projects/$projectId"

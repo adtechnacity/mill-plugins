@@ -1,15 +1,19 @@
 package atn.mill
 
 import utest._
-import org.scalacheck.{Arbitrary, Gen, Prop, Test}
+import org.scalacheck.{Arbitrary, Gen, Prop}
 import org.scalacheck.Prop.{forAll, propBoolean}
+import PropertyChecks.checkProp
 
 object DeveloperExperienceTest extends TestSuite:
   import DeveloperExperience.*
 
-  private def checkProp(prop: Prop): Unit =
-    val result = Test.check(prop)(identity)
-    assert(result.passed)
+  /** `teamsToCreate` over generated team names and existing teams, handed to `check` as (all, existing, result). */
+  private def forAllTeamsToCreate(check: (List[String], Set[String], List[String]) => Prop): Unit =
+    checkProp(forAll(genTeamNames, genTeamNames) { (allNames, existingNames) =>
+      val existing = existingNames.toSet
+      check(allNames, existing, teamsToCreate(mkTeamsJson(allNames), existing))
+    })
 
   // -- Generators --
 
@@ -151,36 +155,29 @@ object DeveloperExperienceTest extends TestSuite:
     test("teamsToCreate"):
 
       test("result is a subset of teamNames"):
-        checkProp(forAll(genTeamNames, genTeamNames) { (allNames, existingNames) =>
-          val json     = mkTeamsJson(allNames)
-          val existing = existingNames.toSet
-          val result   = teamsToCreate(json, existing)
+        forAllTeamsToCreate { (allNames, _, result) =>
           result
             .forall(allNames.contains)
             .label(s"result $result contains names not in $allNames")
-        })
+        }
 
       test("result has no intersection with existing teams"):
-        checkProp(forAll(genTeamNames, genTeamNames) { (allNames, existingNames) =>
-          val json     = mkTeamsJson(allNames)
-          val existing = existingNames.toSet
-          val result   = teamsToCreate(json, existing).toSet
+        forAllTeamsToCreate { (_, existing, created) =>
+          val result = created.toSet
           result
             .intersect(existing)
             .isEmpty
             .label(s"result $result intersects with existing $existing")
-        })
+        }
 
       test("union of result and existing teams covers all team names"):
-        checkProp(forAll(genTeamNames, genTeamNames) { (allNames, existingNames) =>
-          val json     = mkTeamsJson(allNames)
-          val existing = existingNames.toSet
-          val result   = teamsToCreate(json, existing).toSet
-          val allSet   = allNames.toSet
+        forAllTeamsToCreate { (allNames, existing, created) =>
+          val result = created.toSet
+          val allSet = allNames.toSet
           allSet
             .subsetOf(result.union(existing))
             .label(s"$allSet not covered by result $result ++ existing $existing")
-        })
+        }
 
       test("with empty existing set, returns all team names"):
         checkProp(forAll(genTeamNames) { names =>

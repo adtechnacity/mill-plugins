@@ -127,15 +127,7 @@ object DocTransformerTest extends TestSuite:
 
     test("transform") {
       test("simple file without splits") {
-        val tmp       = os.temp.dir()
-        val sourceDir = tmp / "project"
-        val targetDir = tmp / "staged" / "_docs"
-        os.makeDir.all(sourceDir)
-        os.makeDir.all(targetDir)
-        os.write(sourceDir / "TOPICS.md", "# Kafka Topics\n\nSome content about topics.\n")
-
-        val result =
-          DocTransformer.transform(source = sourceDir / "TOPICS.md", projectName = "bi-services", targetDir = targetDir)
+        val (result, targetDir) = DocFixtures.transformed("TOPICS.md", "# Kafka Topics\n\nSome content about topics.\n")
 
         assert(result.files == Seq(targetDir / "topics.md"))
         assert(result.warnings.isEmpty)
@@ -146,15 +138,7 @@ object DocTransformerTest extends TestSuite:
       }
 
       test("README becomes index.md with project name title") {
-        val tmp       = os.temp.dir()
-        val sourceDir = tmp / "project"
-        val targetDir = tmp / "staged" / "_docs"
-        os.makeDir.all(sourceDir)
-        os.makeDir.all(targetDir)
-        os.write(sourceDir / "README.md", "# My Project\n\nWelcome.\n")
-
-        val result =
-          DocTransformer.transform(source = sourceDir / "README.md", projectName = "bi-services", targetDir = targetDir)
+        val (result, targetDir) = DocFixtures.transformed("README.md", "# My Project\n\nWelcome.\n")
 
         assert(result.files == Seq(targetDir / "index.md"))
         val content = os.read(targetDir / "index.md")
@@ -162,18 +146,10 @@ object DocTransformerTest extends TestSuite:
       }
 
       test("file with split markers produces multiple files") {
-        val tmp       = os.temp.dir()
-        val sourceDir = tmp / "project"
-        val targetDir = tmp / "staged" / "_docs"
-        os.makeDir.all(sourceDir)
-        os.makeDir.all(targetDir)
-        os.write(
-          sourceDir / "README.md",
+        val (result, targetDir) = DocFixtures.transformed(
+          "README.md",
           "# Main\n\nIntro\n\n<!-- split: title: Getting Started -->\n\n# Getting Started\n\nSteps here.\n"
         )
-
-        val result =
-          DocTransformer.transform(source = sourceDir / "README.md", projectName = "bi-services", targetDir = targetDir)
 
         assert(result.files.length == 2)
         assert(result.files.contains(targetDir / "index.md"))
@@ -187,15 +163,10 @@ object DocTransformerTest extends TestSuite:
       }
 
       test("copies referenced images") {
-        val tmp       = os.temp.dir()
-        val sourceDir = tmp / "project"
-        val targetDir = tmp / "staged" / "_docs"
-        os.makeDir.all(sourceDir / "images")
-        os.makeDir.all(targetDir)
-        os.write(sourceDir / "images" / "arch.png", "fake-image-data")
-        os.write(sourceDir / "DOC.md", "# Doc\n\n![arch](images/arch.png)\n")
-
-        val result = DocTransformer.transform(source = sourceDir / "DOC.md", projectName = "test", targetDir = targetDir)
+        val (sourceDir, targetDir) = DocFixtures.projectDirs()
+        os.write(sourceDir / "images" / "arch.png", "fake-image-data", createFolders = true)
+        val result                 =
+          DocFixtures.transform(sourceDir, targetDir, "DOC.md", "# Doc\n\n![arch](images/arch.png)\n", "test")
 
         assert(result.warnings.isEmpty)
         assert(os.exists(targetDir / "images" / "arch.png"))
@@ -203,14 +174,7 @@ object DocTransformerTest extends TestSuite:
       }
 
       test("returns warnings for missing images") {
-        val tmp       = os.temp.dir()
-        val sourceDir = tmp / "project"
-        val targetDir = tmp / "staged" / "_docs"
-        os.makeDir.all(sourceDir)
-        os.makeDir.all(targetDir)
-        os.write(sourceDir / "DOC.md", "# Doc\n\n![missing](images/nope.png)\n")
-
-        val result = DocTransformer.transform(source = sourceDir / "DOC.md", projectName = "test", targetDir = targetDir)
+        val (result, targetDir) = DocFixtures.transformed("DOC.md", "# Doc\n\n![missing](images/nope.png)\n", "test")
 
         assert(result.files.nonEmpty)
         assert(result.warnings.length == 1)
@@ -224,27 +188,44 @@ object DocTransformerTest extends TestSuite:
         val targetDir = tmp / "_docs"
         os.makeDir.all(targetDir)
 
-        val ex =
-          try
-            DocTransformer.transform(tmp / "NONEXISTENT.md", "test", targetDir)
-            sys.error("Expected IllegalArgumentException")
-          catch case e: IllegalArgumentException => e
+        val ex = DocFixtures.transformFailure(tmp / "NONEXISTENT.md", targetDir)
         assert(ex.getMessage.contains("Static doc source not found"))
       }
 
       test("split marker without title throws") {
-        val tmp       = os.temp.dir()
-        val sourceDir = tmp / "project"
-        val targetDir = tmp / "_docs"
-        os.makeDir.all(sourceDir)
-        os.makeDir.all(targetDir)
+        val (sourceDir, targetDir) = DocFixtures.projectDirs(target = os.sub / "_docs")
         os.write(sourceDir / "BAD.md", "# Main\n\n<!-- split: sidebar_position: 3 -->\n\nContent\n")
 
-        val ex =
-          try
-            DocTransformer.transform(sourceDir / "BAD.md", "test", targetDir)
-            sys.error("Expected IllegalArgumentException")
-          catch case e: IllegalArgumentException => e
+        val ex = DocFixtures.transformFailure(sourceDir / "BAD.md", targetDir)
         assert(ex.getMessage.contains("missing 'title'"))
       }
     }
+
+/** Scratch project layouts for the `DocTransformer.transform` tests. */
+private object DocFixtures:
+
+  /** A fresh temp dir with a `project` source dir and a `target` dir, both created: (sourceDir, targetDir). */
+  def projectDirs(target: os.SubPath = os.sub / "staged" / "_docs"): (os.Path, os.Path) =
+    val tmp       = os.temp.dir()
+    val sourceDir = tmp / "project"
+    val targetDir = tmp / target
+    os.makeDir.all(sourceDir)
+    os.makeDir.all(targetDir)
+    (sourceDir, targetDir)
+
+  /** Writes `content` as `name` into `sourceDir` and transforms it into `targetDir`. */
+  def transform(sourceDir: os.Path, targetDir: os.Path, name: String, content: String, projectName: String) =
+    os.write(sourceDir / name, content)
+    DocTransformer.transform(source = sourceDir / name, projectName = projectName, targetDir = targetDir)
+
+  /** [[transform]] in a fresh project: (result, targetDir). */
+  def transformed(name: String, content: String, projectName: String = "bi-services") =
+    val (sourceDir, targetDir) = projectDirs()
+    (transform(sourceDir, targetDir, name, content, projectName), targetDir)
+
+  /** The `IllegalArgumentException` transforming `source` must throw. */
+  def transformFailure(source: os.Path, targetDir: os.Path): IllegalArgumentException =
+    try
+      DocTransformer.transform(source, "test", targetDir)
+      sys.error("Expected IllegalArgumentException")
+    catch case e: IllegalArgumentException => e
