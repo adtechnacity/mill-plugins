@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.0] - 2026-09-08
+
+### Breaking Changes
+
+- **docs**: reference the root build through ModuleRef so wildcard selectors resolve
+
+### Added
+
+- **cpd**: workspace-wide CPD with warning/error token thresholds
+
+### Fixed
+
+- **examples**: restore ExampleTester Usage blocks so example tests execute
+- **docs**: reference the root build through ModuleRef so wildcard selectors resolve
+
 ## [0.9.0] - 2026-09-04
 
 ### Added
