@@ -3,6 +3,7 @@ package build
 import mill._, scalalib._, publish._
 import mill.contrib.versionfile.VersionFileModule
 import com.github.lolgab.mill.mima.*
+import mill.contrib.scoverage.{ScoverageModule, ScoverageReport}
 import atn.mill.*
 
 val millVersion = mill.util.BuildInfo.millVersion
@@ -11,8 +12,9 @@ object projectVersion extends VersionFileModule {
   def moduleDir = build.moduleDir
 }
 
-trait MillPluginModule extends ScalaModule with PublishModule with Mima {
+trait MillPluginModule extends ScalaModule with PublishModule with Mima with ScoverageModule {
   def scalaVersion         = "3.8.4"
+  def scoverageVersion     = "2.5.2"
   def publishVersion       = projectVersion.currentVersion().toString
   def mimaPreviousVersions = Seq("0.3.0")
 
@@ -27,7 +29,8 @@ trait MillPluginModule extends ScalaModule with PublishModule with Mima {
 
   def compileMvnDeps = super.compileMvnDeps() ++ Seq(mvn"com.lihaoyi::mill-libs:$millVersion")
 
-  trait MillPluginTests extends ScalaTests {
+  // ScoverageTests runs the suite against the instrumented classes, so `__.test` collects coverage.
+  trait MillPluginTests extends ScoverageTests {
     def mvnDeps       = Seq(
       mvn"com.lihaoyi::utest:0.9.5",
       mvn"com.lihaoyi::mill-testkit:$millVersion",
@@ -75,12 +78,30 @@ trait MillPluginModule extends ScalaModule with PublishModule with Mima {
   }
 }
 
+/** Mutation testing of a plugin module with the published mill-stryker4s: `./mill <module>.strykerMutate`. */
+trait MillPluginMutation extends Stryker4sModule {
+  def strykerVersion = "0.20.4"
+
+  // Two mutators produce mutants that os-lib rejects at compile time: MethodExpression turns `os.exists(p)` into
+  // `os.forall(p)` (no such member) and StringLiteral turns `dir / "name"` into `dir / ""` (the path-segment macro
+  // fails on an empty literal). The 0.9.0 runner reports one generic compile error instead of per-line ones, so
+  // stryker4s cannot roll back just those mutants and aborts the whole module (UnableToFixCompilerErrorsException).
+  // Both patterns occur in nearly every plugin, so the mutators are excluded rather than the files.
+  override def strykerExcludedMutations = Seq("MethodExpression", "StringLiteral")
+}
+
+/** Aggregated coverage over every plugin module: `./mill scoverage.htmlReportAll` / `scoverage.xmlReportAll`. */
+object scoverage extends ScoverageReport {
+  def scalaVersion     = "3.8.4"
+  def scoverageVersion = "2.5.2"
+}
+
 object core extends MillPluginModule {
   def artifactName = "mill-core_mill1"
   def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3", mvn"org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r")
 }
 
-object stryker4s extends MillPluginModule {
+object stryker4s extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-stryker4s_mill1"
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
@@ -88,6 +109,8 @@ object stryker4s extends MillPluginModule {
     mvn"io.stryker-mutator::stryker4s-command-runner:0.20.4",
     mvn"co.fs2::fs2-core:3.13.0"
   )
+
+  def strykerTestModule = test
 
   object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
@@ -117,7 +140,7 @@ object scalafix extends MillPluginModule {
   }
 }
 
-object docs extends MillPluginModule {
+object docs extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-docs_mill1"
   def mvnDeps      = Seq(mvn"org.typelevel::cats-core:2.13.0", mvn"com.lihaoyi::mill-contrib-scoverage:$millVersion")
 
@@ -132,13 +155,15 @@ object docs extends MillPluginModule {
       ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.DocsModule.moduleDirectChildren")
     )
 
+  def strykerTestModule = test
+
   object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(docs)
   }
 }
 
-object githooks extends MillPluginModule {
+object githooks extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-githooks_mill1"
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
@@ -151,6 +176,8 @@ object githooks extends MillPluginModule {
   // prePushExtraCommands param is defaulted, so the constructor change is source-compatible.
   override def mimaBinaryIssueFilters =
     super.mimaBinaryIssueFilters() ++ Seq(ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.GitInstall.this"))
+
+  def strykerTestModule = test
 
   object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
@@ -172,9 +199,11 @@ object sonar extends MillPluginModule {
   }
 }
 
-object release extends MillPluginModule {
+object release extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-release_mill1"
   def moduleDeps   = Seq(core)
+
+  def strykerTestModule = test
 
   object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
@@ -182,12 +211,14 @@ object release extends MillPluginModule {
   }
 }
 
-object pulumi extends MillPluginModule {
+object pulumi extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-pulumi_mill1"
   def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.13.2")
 
   // First released in 0.8.0, so that is the baseline rather than the repo-wide 0.3.0.
   override def mimaPreviousVersions = Seq("0.8.0")
+
+  def strykerTestModule = test
 
   object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
@@ -197,9 +228,11 @@ object pulumi extends MillPluginModule {
 
 object rel extends ReleaseModule
 
-object devx extends MillPluginModule {
+object devx extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-devx_mill1"
   def mvnDeps      = Seq(mvn"com.lihaoyi::requests:0.9.3", mvn"com.lihaoyi::upickle:4.4.3")
+
+  def strykerTestModule = test
 
   object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
@@ -207,6 +240,8 @@ object devx extends MillPluginModule {
   }
 }
 
+// No MillPluginMutation: the tests read MILL_TEST_RESOURCE_DIR, which the 0.9.0 stryker runner does not forward
+// (it ignores the test module's forkEnv), so the initial test run fails before any mutant is tried.
 object cpd extends MillPluginModule {
   def artifactName = "mill-cpd_mill1"
 
