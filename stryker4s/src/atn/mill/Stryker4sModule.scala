@@ -140,7 +140,9 @@ trait Stryker4sModule extends ScalaModule:
       moduleSourceDirs = mirroredSourceDirs,
       scalacOptions = moduleScalacOpts,
       testRunnerJavaOpts = strykerTestRunnerJvmArgs(),
-      testRunnerEnv = strykerTestRunnerEnv()
+      testRunnerEnv = strykerTestRunnerEnv(),
+      // Outside stryker4s's tmp dir (deleted at the end of the run), next to the reports.
+      testRunnerLogDir = Some(dest / "testrunner-logs")
     )
 
     try

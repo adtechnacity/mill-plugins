@@ -142,34 +142,39 @@ object MillProcessTestRunner:
   /**
    * The process specification for a server on `classpath`. `javaOpts` (the test module's `forkArgs` followed by the
    * stryker options) go between the classpath and the socket property; `env` is the test module's `forkEnv`, so the
-   * variables Mill's own runner would set (`MILL_TEST_RESOURCE_DIR`, ...) reach the tests under mutation as well.
+   * variables Mill's own runner would set (`MILL_TEST_RESOURCE_DIR`, ...) reach the tests under mutation as well. The
+   * server runs in `workingDir` (stryker4s's tmp copy of the sources) but logs to `logDir`: stryker4s deletes the tmp
+   * dir at the end of the run while the server may still hold its log open, which on NFS leaves a `.nfsXXXX` entry
+   * behind and fails the delete.
    */
   def processSpec(
     classpath: Seq[os.Path],
     javaOpts: Seq[String],
     env: Map[String, String],
     socketPath: os.Path,
-    workingDir: os.Path
+    workingDir: os.Path,
+    logDir: os.Path
   ): TestRunnerProcess =
     val args    = List("-cp", classpath.map(_.toString).mkString(classPathSeparator)) ++
       javaOpts ++
       List(s"-D${TestProcessProperties.unixSocketPath}=$socketPath", "stryker4s.sbt.testrunner.SbtTestRunnerMain")
     // Server output goes to a log file, NEVER an inherited pipe: the initial run streams the whole suite's test
     // output, and a pipe with no active reader would fill up and block the server (and with it the whole run).
-    val logFile = workingDir / s"testrunner-${ProcessHandle.current().pid()}-${System.nanoTime()}.log"
+    val logFile = logDir / s"testrunner-${ProcessHandle.current().pid()}-${System.nanoTime()}.log"
     TestRunnerProcess(args, env, workingDir, logFile)
 
   /**
-   * Fork one `SbtTestRunnerMain` server on `classpath` with `env` added to its environment, connect to it over a fresh
-   * unix socket, and hand it the test context. The returned runner is wrapped by the caller with stryker4s core's
-   * timeout/retry decorators.
+   * Fork one `SbtTestRunnerMain` server on `classpath` with `env` added to its environment and its output in `logDir`,
+   * connect to it over a fresh unix socket, and hand it the test context. The returned runner is wrapped by the caller
+   * with stryker4s core's timeout/retry decorators.
    */
   def newProcess(
     classpath: Seq[os.Path],
     javaOpts: Seq[String],
     env: Map[String, String],
     testGroups: Seq[TestGroup],
-    workingDir: os.Path
+    workingDir: os.Path,
+    logDir: os.Path
   )(using config: Config, log: Logger): Resource[IO, TestRunner] =
     for
       socketPath <- Resource.eval(IO.blocking {
@@ -178,7 +183,7 @@ object MillProcessTestRunner:
                       os.remove(f)
                       f
                     })
-      _          <- createProcess(processSpec(classpath, javaOpts, env, socketPath, workingDir))
+      _          <- createProcess(processSpec(classpath, javaOpts, env, socketPath, workingDir, logDir))
       conn       <- connectWithBackoff(socketPath)
       _          <- Resource.eval(conn.sendMessage(TestProcessContext(testGroups)).void)
     yield new MillProcessTestRunner(conn)
@@ -188,7 +193,8 @@ object MillProcessTestRunner:
     Resource.make(IO.blocking {
       // The classpath is routinely too long for the OS argument limit — pass everything via a java @argfile.
       val argFile = os.temp(spec.args.map(quoteArg).mkString(" "), prefix = "s4s-args-")
-      log.debug(s"Starting testrunner process '$javaBin @$argFile'")
+      log.debug(s"Starting testrunner process '$javaBin @$argFile' (log: ${spec.logFile})")
+      os.makeDir.all(spec.logFile / os.up)
       os.proc(javaBin.toString, s"@$argFile")
         .spawn(cwd = spec.workingDir, env = spec.env, stdout = spec.logFile, mergeErrIntoOut = true)
     })(process => IO.blocking(process.destroyForcibly()))
