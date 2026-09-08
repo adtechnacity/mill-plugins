@@ -2,6 +2,7 @@ package atn.mill
 
 import mill.*
 import mill.api.PathRef
+import stryker4s.model.CompilerErrMsg
 
 final case class StrykerThresholds(high: Int = 80, low: Int = 60, break: Int = 0)
 
@@ -61,3 +62,43 @@ object StrykerModule:
 
   def filterScalacOptions(opts: Seq[String]): Seq[String] =
     opts.filterNot(opt => opt == "-Xfatal-warnings" || opt.contains("unused"))
+
+  private val ansiCode     = "\u001b\\[[0-9;]*m".r
+  private val scala3Header = """^-- (?:\[E\d+\] )?(.*?[Ee]rror): (.+?):(\d+):(\d+)(?:\s.*)?$""".r
+  private val scala2Error  = """^(.+?):(\d+): error: (.*)$""".r
+  private val caretLine    = """^\s*\|\s*\^+\s*$""".r
+
+  /**
+   * Parse scalac output into one [[stryker4s.model.CompilerErrMsg]] per reported error, which is what lets stryker4s
+   * roll back only the mutants that do not compile instead of aborting the whole module: its `RollbackHandler` matches
+   * `mutatedFile.fileOrigin.toString.endsWith(err.path)` and compares the 1-based `line` with the mutation switch case
+   * statements of the mutated source.
+   *
+   * The path is made relative to `sourceDir` (stryker4s's tmp copy of the sources), so it is a suffix of the mirrored
+   * `fileOrigin` under `Task.dest`; a path outside `sourceDir` is kept verbatim. Scala 3 blocks (`-- [E008] Not Found
+   * Error: <path>:<line>:<col> ---`, message on the line after the caret line) and Scala 2 lines (`<path>:<line>:
+   * error: <message>`) are recognised; warnings and ANSI colour codes are ignored.
+   */
+  def parseCompilerErrors(output: String, sourceDir: os.Path): Seq[CompilerErrMsg] =
+    val lines = ansiCode.replaceAllIn(output, "").linesIterator.toVector
+    lines.zipWithIndex.collect {
+      case (scala3Header(kind, path, line, _), index) =>
+        CompilerErrMsg(scala3Message(lines.drop(index + 1)).getOrElse(kind), relativeTo(path, sourceDir), line.toInt)
+      case (scala2Error(path, line, message), _)      =>
+        CompilerErrMsg(message.trim, relativeTo(path, sourceDir), line.toInt)
+    }
+
+  /** The first message line of a Scala 3 diagnostic block: the `|`-prefixed line after the caret line. */
+  private def scala3Message(rest: Seq[String]): Option[String] =
+    rest
+      .takeWhile(line => !line.startsWith("-- "))
+      .dropWhile(line => !caretLine.matches(line))
+      .drop(1)
+      .headOption
+      .map(_.dropWhile(_ != '|').drop(1).trim)
+      .filter(_.nonEmpty)
+
+  private def relativeTo(path: String, sourceDir: os.Path): String =
+    os.FilePath(path) match
+      case p: os.Path if p.startsWith(sourceDir) => p.relativeTo(sourceDir).toString
+      case _                                     => path

@@ -68,79 +68,106 @@ class Stryker4sMillRunner(
       else Seq.empty
     }
 
-    if scalaFiles.nonEmpty then
-      logger.info(s"Compiling ${scalaFiles.size} instrumented source file(s)...")
+    val compiled =
+      if scalaFiles.isEmpty then Right(())
+      else compileInstrumented(scalaFiles, sourceDir, classDir, testRunnerCp)
 
-      // Resolve the compiler classpath via coursier. Scala 3 publishes `scala3-compiler_3`, Scala 2 publishes an
-      // unsuffixed `scala-compiler` at the full Scala version — asking for `scala3-compiler_3` at a 2.13.x version
-      // resolves nothing and fails the whole run before any mutant is instrumented.
-      val compilerModule = coursier.Module(
-        coursier.Organization("org.scala-lang"),
-        coursier.ModuleName(StrykerModule.compilerArtifactName(scalaVersion))
-      )
+    compiled.map { _ =>
+      // Mutated classes shadow the originals; the testrunner artifact precedes the test classpath.
+      val runnerClasspath = classDir +: (testRunnerCp ++ testClasspath)
+      val testGroups      = Stryker4sMillRunner.buildTestGroups(testClasspath, frameworkName, testClasses)
 
-      @annotation.nowarn("msg=deprecated")
-      val compilerCp = coursier
-        .Fetch()
-        .addDependencies(coursier.Dependency(compilerModule, scalaVersion))
-        .run()
-        .toSeq
-        .map(_.getAbsolutePath)
+      // Shared across runners: set once from the initial run's duration, read by every timeoutRunner.
+      val sharedTimeout = Deferred.unsafe[IO, FiniteDuration]
 
-      // Instrumented sources reference stryker4s.coverage.coverMutant / stryker4s.activeMutation — the testrunner
-      // artifact must be on the compile classpath too.
-      val compileCp        =
-        (testRunnerCp.map(_.toString) ++ testClasspath.map(_.toString)).mkString(java.io.File.pathSeparator)
-      val compilerAndLibCp = (compilerCp ++ testRunnerCp.map(_.toString) ++ testClasspath.map(_.toString))
-        .mkString(java.io.File.pathSeparator)
+      val runners = (1 to concurrency).map { _ =>
+        val process = MillProcessTestRunner.newProcess(
+          classpath = runnerClasspath,
+          javaOpts = testRunnerJavaOpts,
+          env = testRunnerEnv,
+          testGroups = testGroups,
+          workingDir = sourceDir
+        )
+        TestRunner.retryRunner(TestRunner.timeoutRunner(sharedTimeout, process))
+      }.toList
+      NonEmptyList.fromListUnsafe(runners)
+    }
 
-      // Filter scalac options: keep language/source settings, drop fatal warnings and plugin paths
-      val filteredScalacOpts = scalacOptions.filterNot { opt =>
-        opt == "-Xfatal-warnings" ||
-        opt == "-Yexplicit-nulls" ||
-        opt.startsWith("-Xplugin") ||
-        opt.startsWith("-P:") ||
-        opt.contains("semanticdb") ||
-        opt.contains("unused")
-      }
+  /**
+   * Compile the instrumented sources into `classDir`. On failure the scalac output is parsed into one
+   * [[CompilerErrMsg]] per error (see [[StrykerModule.parseCompilerErrors]]), which stryker4s uses to roll back only
+   * the mutants that do not compile; a generic error is returned when nothing could be parsed, in which case the module
+   * is aborted as before.
+   */
+  private def compileInstrumented(
+    scalaFiles: Seq[os.Path],
+    sourceDir: os.Path,
+    classDir: os.Path,
+    testRunnerCp: Seq[os.Path]
+  ): Either[NonEmptyList[CompilerErrMsg], Unit] =
+    logger.info(s"Compiling ${scalaFiles.size} instrumented source file(s)...")
 
-      val javaBin           = os.Path(sys.props("java.home")) / "bin" / "java"
-      val args: Seq[String] = Seq(
-        javaBin.toString,
-        "-cp",
-        compilerAndLibCp,
-        StrykerModule.compilerMainClass(scalaVersion),
-        "-d",
-        classDir.toString,
-        "-classpath",
-        compileCp
-      ) ++ filteredScalacOpts ++ scalaFiles.map(_.toString)
-      val scalacResult      = os.proc(args).call(check = false, stdout = os.Inherit, stderr = os.Inherit)
+    // Resolve the compiler classpath via coursier. Scala 3 publishes `scala3-compiler_3`, Scala 2 publishes an
+    // unsuffixed `scala-compiler` at the full Scala version — asking for `scala3-compiler_3` at a 2.13.x version
+    // resolves nothing and fails the whole run before any mutant is instrumented.
+    val compilerModule = coursier.Module(
+      coursier.Organization("org.scala-lang"),
+      coursier.ModuleName(StrykerModule.compilerArtifactName(scalaVersion))
+    )
 
-      if scalacResult.exitCode != 0 then
-        logger.warn(s"Compilation of instrumented sources failed (exit code ${scalacResult.exitCode})")
-        return Left(NonEmptyList.one(CompilerErrMsg("Compilation failed", sourceDir.toString, Integer.valueOf(0))))
+    @annotation.nowarn("msg=deprecated")
+    val compilerCp = coursier
+      .Fetch()
+      .addDependencies(coursier.Dependency(compilerModule, scalaVersion))
+      .run()
+      .toSeq
+      .map(_.getAbsolutePath)
 
+    // Instrumented sources reference stryker4s.coverage.coverMutant / stryker4s.activeMutation — the testrunner
+    // artifact must be on the compile classpath too.
+    val compileCp        =
+      (testRunnerCp.map(_.toString) ++ testClasspath.map(_.toString)).mkString(java.io.File.pathSeparator)
+    val compilerAndLibCp = (compilerCp ++ testRunnerCp.map(_.toString) ++ testClasspath.map(_.toString))
+      .mkString(java.io.File.pathSeparator)
+
+    // Filter scalac options: keep language/source settings, drop fatal warnings and plugin paths
+    val filteredScalacOpts = scalacOptions.filterNot { opt =>
+      opt == "-Xfatal-warnings" ||
+      opt == "-Yexplicit-nulls" ||
+      opt.startsWith("-Xplugin") ||
+      opt.startsWith("-P:") ||
+      opt.contains("semanticdb") ||
+      opt.contains("unused")
+    }
+
+    val javaBin           = os.Path(sys.props("java.home")) / "bin" / "java"
+    val args: Seq[String] = Seq(
+      javaBin.toString,
+      "-cp",
+      compilerAndLibCp,
+      StrykerModule.compilerMainClass(scalaVersion),
+      "-d",
+      classDir.toString,
+      "-classpath",
+      compileCp
+    ) ++ filteredScalacOpts ++ scalaFiles.map(_.toString)
+    // Captured rather than inherited: the diagnostics are what maps a failed compile back to its mutants. They are
+    // echoed through the logger on failure so they stay visible.
+    val scalacResult      = os.proc(args).call(check = false, stdout = os.Pipe, mergeErrIntoOut = true)
+    val output            = scalacResult.out.text()
+
+    if scalacResult.exitCode == 0 then
       logger.info(s"Compiled instrumented sources to $classDir")
-
-    // Mutated classes shadow the originals; the testrunner artifact precedes the test classpath.
-    val runnerClasspath = classDir +: (testRunnerCp ++ testClasspath)
-    val testGroups      = Stryker4sMillRunner.buildTestGroups(testClasspath, frameworkName, testClasses)
-
-    // Shared across runners: set once from the initial run's duration, read by every timeoutRunner.
-    val sharedTimeout = Deferred.unsafe[IO, FiniteDuration]
-
-    val runners = (1 to concurrency).map { _ =>
-      val process = MillProcessTestRunner.newProcess(
-        classpath = runnerClasspath,
-        javaOpts = testRunnerJavaOpts,
-        env = testRunnerEnv,
-        testGroups = testGroups,
-        workingDir = sourceDir
+      Right(())
+    else
+      logger.warn(s"Compilation of instrumented sources failed (exit code ${scalacResult.exitCode})\n$output")
+      val errors = StrykerModule.parseCompilerErrors(output, sourceDir)
+      logger.info(s"${errors.size} compile error(s) mapped to their mutants for rollback")
+      Left(
+        NonEmptyList
+          .fromList(errors.toList)
+          .getOrElse(NonEmptyList.one(CompilerErrMsg("Compilation failed", sourceDir.toString, Integer.valueOf(0))))
       )
-      TestRunner.retryRunner(TestRunner.timeoutRunner(sharedTimeout, process))
-    }.toList
-    Right(NonEmptyList.fromListUnsafe(runners))
 
   override def extraConfigSources: List[ConfigSource[IO]] = List.empty
 

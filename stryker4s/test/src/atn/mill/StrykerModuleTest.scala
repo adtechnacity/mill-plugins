@@ -100,6 +100,66 @@ object StrykerModuleTest extends TestSuite:
       assert(StrykerModule.compilerArtifactName("2.13.16") == "scala-compiler")
     }
 
+    test("parseCompilerErrors - Scala 3 errors become one CompilerErrMsg each, path relative to the tmp source dir") {
+      val tmp        = os.root / "ws" / "out" / "devx" / "strykerMutate.dest" / "target" / "stryker4s-123"
+      val file       = tmp / "devx" / "src" / "atn" / "mill" / "DeveloperExperience.scala"
+      val output     =
+        s"""-- [E008] Not Found Error: $file:264:97 ------------------------------------
+           |264 |        if (!os.forall(teamsPath)) Result.Failure(s"Teams file not found: $$teamsPath") else {
+           |    |             ^^^^^^^^^
+           |    |             value forall is not a member of os
+           |-- Error: $file:87:25 -------------------------------------------------------
+           |87 |        writeJson(dest / "", allSettings)
+           |   |                         ^^
+           |   |Exception occurred while executing macro expansion.
+           |   |os.PathError$$InvalidSegment: [] is not a valid path segment.
+           |2 errors found
+           |""".stripMargin
+      val errors     = StrykerModule.parseCompilerErrors(output, tmp)
+      assert(
+        errors.map(_.path) == Seq(
+          "devx/src/atn/mill/DeveloperExperience.scala",
+          "devx/src/atn/mill/DeveloperExperience.scala"
+        )
+      )
+      assert(errors.map(_.line.intValue) == Seq(264, 87))
+      assert(errors.head.msg == "value forall is not a member of os")
+      assert(errors(1).msg == "Exception occurred while executing macro expansion.")
+      // stryker4s's RollbackHandler matches `mutatedFile.fileOrigin.toString.endsWith(err.path)`; the origin is the
+      // mirrored source under Task.dest, so the tmp-dir prefix must be gone and the rest kept verbatim.
+      val fileOrigin = os.root / "ws" / "out" / "devx" / "strykerMutate.dest" / "devx" / "src" / "atn" / "mill" /
+        "DeveloperExperience.scala"
+      assert(errors.forall(e => fileOrigin.toString.endsWith(e.path)))
+    }
+
+    test("parseCompilerErrors - Scala 2 errors, ANSI colours and paths outside the tmp dir") {
+      val tmp    = os.root / "tmp" / "s4s"
+      val output =
+        "\u001b[31m/tmp/s4s/app/src/Main.scala:12: error: not found: value foo\u001b[0m\n" +
+          "  foo(1)\n  ^\n" +
+          "/elsewhere/Other.scala:3: error: type mismatch;\n" +
+          "one error found\n"
+      val errors = StrykerModule.parseCompilerErrors(output, tmp)
+      assert(
+        errors.map(e => (e.path, e.line.intValue, e.msg)) == Seq(
+          ("app/src/Main.scala", 12, "not found: value foo"),
+          ("/elsewhere/Other.scala", 3, "type mismatch;")
+        )
+      )
+    }
+
+    test("parseCompilerErrors - warnings only or empty output yield no errors") {
+      val tmp      = os.root / "tmp" / "s4s"
+      assert(StrykerModule.parseCompilerErrors("", tmp).isEmpty)
+      val warnings =
+        s"""-- [E092] Pattern Match Unchecked Warning: ${tmp / "a" / "B.scala"}:4:2 ----
+           |4 |  x match
+           |  |  ^
+           |1 warning found
+           |""".stripMargin
+      assert(StrykerModule.parseCompilerErrors(warnings, tmp).isEmpty)
+    }
+
     test("filterScalacOptions - removes fatal warnings and unused") {
       val opts     = Seq("-Xfatal-warnings", "-deprecation", "-Wunused:all", "-Yexplicit-nulls")
       val filtered = StrykerModule.filterScalacOptions(opts)
