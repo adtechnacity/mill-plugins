@@ -9,6 +9,12 @@ on:
   # don't fire workflows), so its workflow dispatches CI explicitly.
   workflow_dispatch:
 
+# pull-requests: write lets the quality-report script maintain its sticky PR
+# comment. Fork PRs get a read-only token; the script then only warns.
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -34,14 +40,117 @@ jobs:
           key: ${{ runner.os }}-mill-${{ hashFiles('.mill-version') }}
           restore-keys: ${{ runner.os }}-mill-
 
+      - name: Script selftest
+        run: python3 .github/scripts/quality-report.py selftest
+
       - name: Compile
         run: ./mill __.compile
 
+      # MillPluginTests are ScoverageTests, so this run is instrumented.
       - name: Test
         run: ./mill __.test
+
+      - name: Coverage report
+        run: ./mill scoverage.xmlReportAll + scoverage.htmlReportAll
+
+      # Example workspaces run a forked Mill against the locally published plugins (~5 min).
+      - name: Examples
+        run: ./mill __.example.testForked
+
+      - name: Upload coverage report
+        id: coverage_html
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: out/scoverage/htmlReportAll.dest
+          if-no-files-found: ignore
+
+      - name: Post coverage
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ARTIFACT_URL: ${{ steps.coverage_html.outputs.artifact-url }}
+        run: |
+          python3 .github/scripts/quality-report.py coverage --artifact-url "$ARTIFACT_URL" \
+            | python3 .github/scripts/quality-report.py post --section coverage --pr ${{ github.event.pull_request.number }}
 
       - name: Format check
         run: ./mill mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll
 
       - name: Binary compatibility check
         run: ./mill __.mimaReportBinaryIssues
+
+  # Mutation score of the PR's delta: every module with a changed .scala file
+  # that has a mutation-tested test module is run through stryker4s.
+  mutation:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: 21
+
+      - name: Cache Coursier
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/coursier
+          key: ${{ runner.os }}-coursier-${{ hashFiles('build.mill', 'mill-build/build.mill', '**/build.mill') }}
+          restore-keys: ${{ runner.os }}-coursier-
+
+      - name: Cache Mill
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mill
+          key: ${{ runner.os }}-mill-${{ hashFiles('.mill-version') }}
+          restore-keys: ${{ runner.os }}-mill-
+
+      - name: Changed modules
+        id: changed
+        run: |
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- '*.scala' | cut -d/ -f1 | sort -u)
+          mutable=$(./mill resolve __.strykerMutate 2>/dev/null | sed -n 's/\.strykerMutate$//p' | sort -u)
+          modules=$(comm -12 <(printf '%s\n' "$changed") <(printf '%s\n' "$mutable") | xargs)
+          echo "Changed top-level dirs: $(xargs <<<"$changed")"
+          echo "Mutation-tested modules: $(xargs <<<"$mutable")"
+          echo "Selected: ${modules:-<none>}"
+          echo "modules=$modules" >> "$GITHUB_OUTPUT"
+
+      # strykerMutate is an exclusive command, so modules run one after another.
+      - name: Mutation testing
+        if: steps.changed.outputs.modules != ''
+        continue-on-error: false
+        env:
+          MODULES: ${{ steps.changed.outputs.modules }}
+        run: |
+          for m in $MODULES; do
+            ./mill "$m.strykerMutate"
+          done
+
+      - name: Upload mutation reports
+        id: mutation_html
+        if: ${{ !cancelled() && steps.changed.outputs.modules != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-html
+          path: out/*/strykerMutate.dest/target/stryker4s-report
+          if-no-files-found: ignore
+
+      - name: Post mutation
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MODULES: ${{ steps.changed.outputs.modules }}
+          ARTIFACT_URL: ${{ steps.mutation_html.outputs.artifact-url }}
+        run: |
+          # shellcheck disable=SC2086 # MODULES is a space-separated list
+          python3 .github/scripts/quality-report.py mutation $MODULES --artifact-url "$ARTIFACT_URL" \
+            | python3 .github/scripts/quality-report.py post --section mutation --pr ${{ github.event.pull_request.number }}
