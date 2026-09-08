@@ -28,6 +28,8 @@ import scala.concurrent.duration.FiniteDuration
  *   fully-qualified test class names
  * @param concurrency
  *   number of parallel test runners
+ * @param testRunnerEnv
+ *   environment added to the forked testrunner processes (the test module's `forkEnv`)
  */
 class Stryker4sMillRunner(
   testClasspath: Seq[os.Path],
@@ -37,7 +39,8 @@ class Stryker4sMillRunner(
   scalaVersion: String,
   moduleSourceDirs: Seq[os.Path],
   scalacOptions: Seq[String] = Seq.empty,
-  testRunnerJavaOpts: Seq[String] = Seq.empty
+  testRunnerJavaOpts: Seq[String] = Seq.empty,
+  testRunnerEnv: Map[String, String] = Map.empty
 )(using logger: Logger)
     extends Stryker4sRunner:
 
@@ -131,6 +134,7 @@ class Stryker4sMillRunner(
       val process = MillProcessTestRunner.newProcess(
         classpath = runnerClasspath,
         javaOpts = testRunnerJavaOpts,
+        env = testRunnerEnv,
         testGroups = testGroups,
         workingDir = sourceDir
       )
