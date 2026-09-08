@@ -126,7 +126,10 @@ object stryker4s extends MillPluginModule with MillPluginMutation {
       ProblemFilter.exclude[MissingClassProblem]("atn.mill.MillTestRunner*"),
       ProblemFilter.exclude[MissingClassProblem]("atn.mill.StrykerTestRunnerMain*"),
       ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.Stryker4sMillRunner.this"),
-      ProblemFilter.exclude[Problem]("atn.mill.Stryker4sMillRunner.<init>$default$9")
+      ProblemFilter.exclude[Problem]("atn.mill.Stryker4sMillRunner.<init>$default$9"),
+      // MillProcessTestRunner is the runner's process plumbing (only Stryker4sMillRunner calls newProcess); its
+      // signature grew the forwarded test-module environment.
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.MillProcessTestRunner.newProcess")
     )
 
 }

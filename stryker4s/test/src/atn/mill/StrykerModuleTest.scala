@@ -120,10 +120,37 @@ object StrykerModuleTest extends TestSuite:
       }
     }
 
+    // One UnitTester scope for both tasks: a second scope over the same root module deletes the first one's out dir
+    // while this JVM still holds a handle in it, which NFS turns into a `.nfsXXXX: Device or resource busy` failure.
+    test("strykerTestRunnerEnv/JvmArgs - forward the test module's forkEnv and forkArgs to the testrunner") {
+      UnitTester(TestStrykerForkBuild, os.temp.dir()).scoped { eval =>
+        val Right(envResult)  = eval(TestStrykerForkBuild.strykerTestRunnerEnv): @unchecked
+        val env               = envResult.value
+        // Mill's own test task adds MILL_TEST_RESOURCE_DIR on top of forkEnv; tests reading it (cpd's do) can only
+        // run under mutation if the forked stryker testrunner sees the same map.
+        assert(env("STRYKER_TEST_FLAG") == "on")
+        assert(env("MILL_TEST_RESOURCE_DIR").nonEmpty)
+        val Right(argsResult) = eval(TestStrykerForkBuild.strykerTestRunnerJvmArgs): @unchecked
+        val args              = argsResult.value
+        assert(args.indexOf("-Dstryker.test=1") < args.indexOf("-Xmx4G"))
+        assert(args.last == "-Xmx4G")
+      }
+    }
+
 object TestStrykerBuild extends TestRootModule with Stryker4sModule:
   def scalaVersion      = "3.8.2"
   def strykerVersion    = "0.19.1"
   def strykerTestModule = test
   object test extends ScalaTests with TestModule.Utest:
     override def mvnDeps = Seq.empty
+  lazy val millDiscover: Discover = Discover[this.type]
+
+object TestStrykerForkBuild extends TestRootModule with Stryker4sModule:
+  def scalaVersion      = "3.8.2"
+  def strykerVersion    = "0.19.1"
+  def strykerTestModule = test
+  object test extends ScalaTests with TestModule.Utest:
+    override def mvnDeps  = Seq.empty
+    override def forkEnv  = Task(super.forkEnv() ++ Map("STRYKER_TEST_FLAG" -> "on"))
+    override def forkArgs = Task(super.forkArgs() ++ Seq("-Dstryker.test=1"))
   lazy val millDiscover: Discover = Discover[this.type]

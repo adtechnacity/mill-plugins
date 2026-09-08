@@ -60,6 +60,19 @@ trait Stryker4sModule extends ScalaModule:
   /** JVM options for the forked long-lived testrunner processes. */
   def strykerTestRunnerJavaOpts: Seq[String] = Seq("-Xmx4G")
 
+  /**
+   * Environment added to the forked testrunner processes: the test module's `allForkEnv`, i.e. its `forkEnv` plus what
+   * Mill's own test task layers on top (`MILL_TEST_RESOURCE_DIR`, ...), so tests reading those variables run under
+   * mutation as well.
+   */
+  def strykerTestRunnerEnv: T[Map[String, String]] = Task(strykerTestModule.allForkEnv())
+
+  /**
+   * JVM arguments of the forked testrunner processes: the test module's `forkArgs` followed by
+   * [[strykerTestRunnerJavaOpts]], so a stryker-specific setting (e.g. `-Xmx`) wins over the test module's.
+   */
+  def strykerTestRunnerJvmArgs: T[Seq[String]] = Task(strykerTestModule.forkArgs() ++ strykerTestRunnerJavaOpts)
+
   /** Scala dialect for the mutator parser. */
   def strykerScalaDialect: String = "scala3future"
 
@@ -126,7 +139,8 @@ trait Stryker4sModule extends ScalaModule:
       scalaVersion = scalaVersion(),
       moduleSourceDirs = mirroredSourceDirs,
       scalacOptions = moduleScalacOpts,
-      testRunnerJavaOpts = strykerTestRunnerJavaOpts
+      testRunnerJavaOpts = strykerTestRunnerJvmArgs(),
+      testRunnerEnv = strykerTestRunnerEnv()
     )
 
     try
