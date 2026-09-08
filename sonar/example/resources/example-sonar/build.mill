@@ -22,8 +22,9 @@ object sonar extends SonarScanner {
   override def coverageReportTaskPath = "scoverage.xmlReportAll"
 }
 
-/**
- * Usage
- *
- * > ./mill resolve sonar._ ...sonar...
- */
+/** Usage
+
+> ./mill resolve sonar._
+...sonar...
+
+*/

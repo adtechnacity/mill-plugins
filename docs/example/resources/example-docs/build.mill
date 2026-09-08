@@ -29,8 +29,10 @@ object docs extends DocsModule {
   override def staticDocSources = Seq.empty[os.RelPath]
 }
 
-/**
- * Usage
- *
- * > ./mill docs.listModules app libs.utils
- */
+/** Usage
+
+> ./mill docs.listModules
+app
+libs.utils
+
+*/
