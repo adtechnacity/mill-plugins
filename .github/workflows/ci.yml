@@ -141,8 +141,8 @@ jobs:
           echo "files=$(paste -sd, <<<"$files")" >> "$GITHUB_OUTPUT"
 
       # strykerMutate is an exclusive command, so modules run one after another. STRYKER_INCLUDED_FILES carries the
-      # PR's changed .scala files for the file-level delta; the published runner ignores it until the
-      # mill-stryker4s pin moves to 1.1.0 and the strykerIncludedFiles override in build.mill is activated.
+      # PR's changed .scala files for the file-level delta (the strykerIncludedFiles override in build.mill reads it;
+      # each module only picks up the entries under its own source roots). Left empty, a module is mutated whole.
       - name: Mutation testing
         if: steps.changed.outputs.modules != ''
         continue-on-error: false
