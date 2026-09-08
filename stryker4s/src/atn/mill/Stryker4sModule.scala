@@ -48,6 +48,16 @@ trait Stryker4sModule extends ScalaModule:
    */
   def strykerExcludedFiles: Seq[String] = Seq.empty
 
+  /**
+   * Source files to mutate, as positive globs relative to the workspace root (e.g.
+   * `"devx/src/atn/mill/CodeScene.scala"` or `"core/src/atn/mill/Git*.scala"`). Empty (the default) mutates every
+   * source of the module; when non-empty these replace the per-source-root patterns (every `.scala` file under each
+   * source root), so a CI job can restrict a run to the files a pull request touched, e.g.
+   * `Task.Input(Task.env.get("STRYKER_INCLUDED_FILES").toSeq.flatMap(_.split(',')))`. [[strykerExcludedFiles]] still
+   * apply on top.
+   */
+  def strykerIncludedFiles: T[Seq[String]] = Task(Seq.empty[String])
+
   /** Score thresholds for pass/warn/fail. */
   def strykerThresholds: StrykerThresholds = StrykerThresholds()
 
@@ -116,8 +126,11 @@ trait Stryker4sModule extends ScalaModule:
       }
       destSrcDir
     }
-    val mutatePatterns     =
-      StrykerModule.mutatePatterns(mirroredSourceDirs.map(_.relativeTo(dest).toString), strykerExcludedFiles)
+    val mutatePatterns     = StrykerModule.mutatePatterns(
+      mirroredSourceDirs.map(_.relativeTo(dest).toString),
+      strykerIncludedFiles(),
+      strykerExcludedFiles
+    )
 
     // Write stryker4s config with base-dir pointing to Task.dest.
     val javaCwd    = os.Path(java.nio.file.Path.of("").toAbsolutePath)
