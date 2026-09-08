@@ -53,6 +53,21 @@ jobs:
       - name: Coverage report
         run: ./mill scoverage.xmlReportAll + scoverage.htmlReportAll
 
+      # Workspace-wide copy-paste detection (the dogfooded mill-cpd); fails on duplications at the error tier.
+      - name: CPD
+        run: ./mill duplication
+
+      # The thresholds must match `object duplication` in build.mill (cpdMinimumTokens / cpdErrorTokens are plain
+      # defs, not tasks, so they cannot be read through `./mill show`).
+      - name: Post CPD
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 .github/scripts/quality-report.py cpd --report-dir out/duplication/cpdCheckAll.dest --warn 25 --error 107 \
+            | python3 .github/scripts/quality-report.py post --section cpd --pr ${{ github.event.pull_request.number }}
+
       # Example workspaces run a forked Mill against the locally published plugins (~5 min).
       - name: Examples
         run: ./mill __.example.testForked
@@ -115,20 +130,25 @@ jobs:
       - name: Changed modules
         id: changed
         run: |
-          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- '*.scala' | cut -d/ -f1 | sort -u)
+          files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- '*.scala' | sort -u)
+          changed=$(cut -d/ -f1 <<<"$files" | sort -u)
           mutable=$(./mill resolve __.strykerMutate 2>/dev/null | sed -n 's/\.strykerMutate$//p' | sort -u)
           modules=$(comm -12 <(printf '%s\n' "$changed") <(printf '%s\n' "$mutable") | xargs)
           echo "Changed top-level dirs: $(xargs <<<"$changed")"
           echo "Mutation-tested modules: $(xargs <<<"$mutable")"
           echo "Selected: ${modules:-<none>}"
           echo "modules=$modules" >> "$GITHUB_OUTPUT"
+          echo "files=$(paste -sd, <<<"$files")" >> "$GITHUB_OUTPUT"
 
-      # strykerMutate is an exclusive command, so modules run one after another.
+      # strykerMutate is an exclusive command, so modules run one after another. STRYKER_INCLUDED_FILES carries the
+      # PR's changed .scala files for the file-level delta; the published runner ignores it until the
+      # mill-stryker4s pin moves to 1.1.0 and the strykerIncludedFiles override in build.mill is activated.
       - name: Mutation testing
         if: steps.changed.outputs.modules != ''
         continue-on-error: false
         env:
           MODULES: ${{ steps.changed.outputs.modules }}
+          STRYKER_INCLUDED_FILES: ${{ steps.changed.outputs.files }}
         run: |
           for m in $MODULES; do
             ./mill "$m.strykerMutate"

@@ -42,6 +42,7 @@ All plugins are checked for binary compatibility using [MiMa](https://github.com
 ./mill scoverage.htmlReportAll       # Aggregate coverage report (after __.test)
 ./mill __.example.testForked         # Run the example workspaces
 ./mill <module>.strykerMutate        # Mutation-test one plugin module
+./mill duplication                   # Workspace-wide copy-paste detection
 ./mill __.mimaReportBinaryIssues     # Check binary compatibility
 ```
 
@@ -50,10 +51,10 @@ All plugins are checked for binary compatibility using [MiMa](https://github.com
 Every pull request gets one sticky "Quality report" comment, maintained by
 [`.github/scripts/quality-report.py`](.github/scripts/quality-report.py): the aggregated statement and branch
 coverage of the instrumented test run (per module, with the HTML report attached to the workflow run as the
-`coverage-html` artifact) and the mutation score of the PR's delta — every module with a changed `.scala` file is
-run through the repo's own published `mill-stryker4s` plugin, with the HTML reports in the `mutation-html` artifact.
-CI also runs the example workspaces. A copy-paste detection (CPD) section arrives once `mill-cpd` is released and
-dogfooded in the meta-build.
+`coverage-html` artifact), the mutation score of the PR's delta — every module with a changed `.scala` file is
+run through the repo's own published `mill-stryker4s` plugin, with the HTML reports in the `mutation-html` artifact —
+and the copy-paste detection summary of the dogfooded `mill-cpd` (`./mill duplication`). CI also runs the example
+workspaces.
 
 ## Releasing
 

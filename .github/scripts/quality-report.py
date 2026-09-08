@@ -274,6 +274,14 @@ def parse_cpd(csv_text):
     return rows
 
 
+def display_path(path):
+    """A path relative to the working directory when it lies below it (PMD reports absolute paths)."""
+    try:
+        return str(Path(path).relative_to(Path.cwd()))
+    except ValueError:
+        return path
+
+
 def cpd_markdown(reports, warn, error):
     """`reports` maps a language to its parsed rows."""
     summary = [
@@ -290,7 +298,13 @@ def cpd_markdown(reports, warn, error):
     )[:5]
     if top:
         rows = [
-            (language, r["tokens"], r["lines"], r["occurrences"], f"`{r['file']}:{r['line']}`" if r["file"] else "")
+            (
+                language,
+                r["tokens"],
+                r["lines"],
+                r["occurrences"],
+                f"`{display_path(r['file'])}:{r['line']}`" if r["file"] else "",
+            )
             for language, r in top
         ]
         lines += [

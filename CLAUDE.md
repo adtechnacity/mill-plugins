@@ -7,6 +7,7 @@
 - `./mill scoverage.htmlReportAll` - Aggregate coverage report into `out/scoverage/htmlReportAll.dest/` (after `__.test`; `xmlReportAll` for the XML)
 - `./mill __.example.testForked` - Run the example workspaces against the locally published plugins (`__.example.test` does not resolve)
 - `./mill <module>.strykerMutate` - Mutation-test one plugin module (report under `out/<module>/strykerMutate.dest/target/stryker4s-report/`)
+- `./mill duplication` - Workspace-wide copy-paste detection (CSV reports under `out/duplication/cpdCheckAll.dest/`)
 - `./mill mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll` - Check formatting
 - `./mill mill.scalalib.scalafmt.ScalafmtModule/reformatAll` - Format all code
 
