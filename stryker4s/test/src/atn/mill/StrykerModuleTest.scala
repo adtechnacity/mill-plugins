@@ -81,6 +81,22 @@ object StrykerModuleTest extends TestSuite:
       assert(!ps.exists(_.startsWith("!!")))
     }
 
+    test("mutatePatterns - included files replace the per-source-root globs, excludes still follow") {
+      val ps = StrykerModule.mutatePatterns(
+        Seq("devx/src", "devx/gen"),
+        Seq("devx/src/atn/mill/CodeScene.scala", "core/src/**/*.scala"),
+        Seq("**/Generated.scala")
+      )
+      // A PR that touched two files should mutate exactly those, not every file of every changed module.
+      assert(ps == Seq("devx/src/atn/mill/CodeScene.scala", "core/src/**/*.scala", "!**/Generated.scala"))
+    }
+
+    test("mutatePatterns - no included files keeps the per-source-root behaviour") {
+      val ps = StrykerModule.mutatePatterns(Seq("devx/src"), Seq.empty, Seq("**/Generated.scala"))
+      assert(ps == StrykerModule.mutatePatterns(Seq("devx/src"), Seq("**/Generated.scala")))
+      assert(ps == Seq("devx/src/**/*.scala", "!**/Generated.scala"))
+    }
+
     test("compilerArtifactName - Scala 3 uses the _3-suffixed artifact") {
       assert(StrykerModule.compilerArtifactName("3.8.4") == "scala3-compiler_3")
       assert(StrykerModule.compilerArtifactName("3.3.7") == "scala3-compiler_3")
@@ -194,6 +210,9 @@ object StrykerModuleTest extends TestSuite:
         val args              = argsResult.value
         assert(args.indexOf("-Dstryker.test=1") < args.indexOf("-Xmx4G"))
         assert(args.last == "-Xmx4G")
+        // Whole-module mutation by default: no included-file globs unless a build (or CI) narrows the scope.
+        val Right(included)   = eval(TestStrykerForkBuild.strykerIncludedFiles): @unchecked
+        assert(included.value.isEmpty)
       }
     }
 

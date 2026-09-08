@@ -42,7 +42,16 @@ object StrykerModule:
    * as a negative match, so an excluded file is skipped without dropping a mutator repo-wide.
    */
   def mutatePatterns(sourceRoots: Seq[String], excludedFiles: Seq[String]): Seq[String] =
-    sourceRoots.map(_ + "/**/*.scala") ++ excludedFiles.map("!" + _)
+    mutatePatterns(sourceRoots, Seq.empty, excludedFiles)
+
+  /**
+   * As the two-argument `mutatePatterns`, narrowed to `includedFiles` when that is non-empty: the positive globs
+   * (relative to the workspace root, e.g. the files a pull request touched) replace the per-source-root patterns (every
+   * `.scala` file under each root), and the excludes still follow as `!` negations.
+   */
+  def mutatePatterns(sourceRoots: Seq[String], includedFiles: Seq[String], excludedFiles: Seq[String]): Seq[String] =
+    val includes = if includedFiles.isEmpty then sourceRoots.map(_ + "/**/*.scala") else includedFiles
+    includes ++ excludedFiles.map("!" + _)
 
   /**
    * The compiler artifact for a Scala version. Scala 3 publishes `scala3-compiler_3`; Scala 2 publishes an unsuffixed
