@@ -4,9 +4,12 @@ object `package` extends meta.MillBuildRootModule {
   def mvnDeps = Seq(
     mvn"com.lihaoyi::mill-contrib-versionfile:${mill.util.BuildInfo.millVersion}",
     mvn"com.lihaoyi::mill-contrib-scoverage:${mill.util.BuildInfo.millVersion}",
-    // Dogfooded previous releases of this repo's own plugins (mill-cpd follows once it is published).
+    // Dogfooded releases of this repo's own plugins. The stryker4s fixes on this branch ship with 1.1.0; bumping
+    // these pins to it re-enables cpd mutation testing, the excluded mutators and the file-level delta (see
+    // MillPluginMutation in build.mill).
     mvn"com.adtechnacity::mill-release::0.2.1",
-    mvn"com.adtechnacity::mill-stryker4s::0.9.0",
+    mvn"com.adtechnacity::mill-stryker4s::1.0.0",
+    mvn"com.adtechnacity::mill-cpd::1.0.0",
     mvn"com.github.lolgab::mill-mima::0.2.1"
   )
 }

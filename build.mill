@@ -4,6 +4,7 @@ import mill._, scalalib._, publish._
 import mill.contrib.versionfile.VersionFileModule
 import com.github.lolgab.mill.mima.*
 import mill.contrib.scoverage.{ScoverageModule, ScoverageReport}
+import mill.api.ModuleRef
 import atn.mill.*
 
 val millVersion = mill.util.BuildInfo.millVersion
@@ -84,16 +85,36 @@ trait MillPluginMutation extends Stryker4sModule {
 
   // Two mutators produce mutants that os-lib rejects at compile time: MethodExpression turns `os.exists(p)` into
   // `os.forall(p)` (no such member) and StringLiteral turns `dir / "name"` into `dir / ""` (the path-segment macro
-  // fails on an empty literal). The 0.9.0 runner reports one generic compile error instead of per-line ones, so
+  // fails on an empty literal). The 1.0.0 runner reports one generic compile error instead of per-line ones, so
   // stryker4s cannot roll back just those mutants and aborts the whole module (UnableToFixCompilerErrorsException).
   // Both patterns occur in nearly every plugin, so the mutators are excluded rather than the files.
+  // TODO re-enable after the 1.1.0 pin bump (per-mutant compiler error reporting ships with it).
   override def strykerExcludedMutations = Seq("MethodExpression", "StringLiteral")
+
+  // File-level delta: CI exports STRYKER_INCLUDED_FILES (comma-separated, relative to the workspace root) so a PR
+  // only mutates the files it touched. `strykerIncludedFiles` ships with 1.1.0.
+  // TODO re-enable after the 1.1.0 pin bump:
+  // override def strykerIncludedFiles = Task.Input(Task.env.get("STRYKER_INCLUDED_FILES").toSeq.flatMap(_.split(',')))
 }
 
 /** Aggregated coverage over every plugin module: `./mill scoverage.htmlReportAll` / `scoverage.xmlReportAll`. */
 object scoverage extends ScoverageReport {
   def scalaVersion     = "3.8.4"
   def scoverageVersion = "2.5.2"
+}
+
+/**
+ * Workspace-wide copy-paste detection over every module's sources (test and example modules included):
+ * `./mill duplication`. Not `cpd` - that name is the plugin module. The CI step and the quality report read the same
+ * thresholds (see the CPD step in .github/workflows/ci.yml, which hardcodes them: cpdMinimumTokens/cpdErrorTokens are
+ * plain defs, not tasks, so `./mill show` cannot serve them).
+ */
+object duplication extends CpdSupport {
+  def cpdRootModule = ModuleRef(build)
+
+  // Ratchet: the largest duplication today is 106 tokens (ScalafixSupport.scala:49 / :66), so this is the smallest
+  // error tier the workspace passes. Lower it (towards the 75 default) once that block is deduplicated.
+  override def cpdErrorTokens = 107
 }
 
 object core extends MillPluginModule {
@@ -243,13 +264,15 @@ object devx extends MillPluginModule with MillPluginMutation {
   }
 }
 
-// No MillPluginMutation: the tests read MILL_TEST_RESOURCE_DIR, which the 0.9.0 stryker runner does not forward
+// No MillPluginMutation: the tests read MILL_TEST_RESOURCE_DIR, which the 1.0.0 stryker runner does not forward
 // (it ignores the test module's forkEnv), so the initial test run fails before any mutant is tried.
+// TODO re-enable after the 1.1.0 pin bump (forkEnv forwarding ships with it): `with MillPluginMutation` +
+// `def strykerTestModule = test`.
 object cpd extends MillPluginModule {
   def artifactName = "mill-cpd_mill1"
 
-  // Not released yet: nothing to compare against until the first version ships.
-  override def mimaPreviousArtifacts = Task(Seq.empty[Dep])
+  // First released in 1.0.0, so that is the baseline rather than the repo-wide 0.3.0.
+  override def mimaPreviousVersions = Seq("1.0.0")
 
   object test    extends MillPluginTests {
     // The unit tests drive UnitTester over the example workspace.
