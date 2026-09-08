@@ -1,6 +1,7 @@
 package build
 
 import mill._, scalalib._
+import mill.api.ModuleRef
 import atn.mill._
 
 // Application modules — DocsModule discovers these automatically
@@ -15,11 +16,12 @@ object libs extends Module {
 }
 
 // Configure DocsModule to generate unified scaladoc across all modules.
-// Point docRootModule at the root build so it can discover ScalaModules.
+// Point docRootModule at the root build so it can discover ScalaModules. The ModuleRef wrapper
+// keeps Mill from treating the reference back to the root as a child module of docs.
 object docs extends DocsModule {
   def docProjectName = "example-project"
   def docVersion     = Task("0.1.0")
-  def docRootModule  = build
+  def docRootModule  = ModuleRef(build)
 
   // Optionally exclude modules or add source links
   override def excludedModules  = Set.empty[String]

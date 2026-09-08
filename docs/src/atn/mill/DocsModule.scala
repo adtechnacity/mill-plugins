@@ -1,6 +1,7 @@
 package atn.mill
 
 import mill._
+import mill.api.ModuleRef
 import mill.contrib.scoverage.ScoverageModule
 import mill.scalalib._
 
@@ -12,15 +13,14 @@ trait DocsModule extends DefaultTaskModule {
   /** Current project version string for the scaladoc site. */
   def docVersion: T[String]
 
-  /** Root module from which to discover all ScalaModules. */
-  def docRootModule: Module
-
-  // Exclude docRootModule from this module's reflected children to prevent a
-  // circular reference: docRootModule points back to an ancestor, and without
-  // this filter Mill's recursive module traversal (moduleInternal.modules,
-  // GitHooksModule.validModules, etc.) would loop infinitely.
-  override def moduleDirectChildren: Seq[Module] =
-    super.moduleDirectChildren.filterNot(_ eq docRootModule)
+  /**
+   * Root module from which to discover all ScalaModules, wrapped in a [[mill.api.ModuleRef]] so that Mill's resolver
+   * does not treat the reference back to the root as a child module of this one:
+   * {{{
+   * def docRootModule = ModuleRef(build)
+   * }}}
+   */
+  def docRootModule: ModuleRef[Module]
 
   /** Module segment paths to exclude from scaladoc generation. */
   def excludedModules: Set[String] = Set.empty
@@ -32,10 +32,10 @@ trait DocsModule extends DefaultTaskModule {
   def staticDocSources: Seq[os.RelPath] = Seq.empty
 
   /** Declared source for the hand-authored docs/ directory. */
-  def docsSiteRoot: T[PathRef] = Task.Source(docRootModule.moduleDir / "docs")
+  def docsSiteRoot: T[PathRef] = Task.Source(docRootModule().moduleDir / "docs")
 
   /** Declared sources for each static doc file so Mill tracks them. */
-  def staticDocSourcePaths: T[Seq[PathRef]] = Task.Sources(staticDocSources.map(docRootModule.moduleDir / _)*)
+  def staticDocSourcePaths: T[Seq[PathRef]] = Task.Sources(staticDocSources.map(docRootModule().moduleDir / _)*)
 
   /** Prepare the siteroot by merging hand-authored docs/ with transformed sources. */
   def preparedSiteRoot: T[PathRef] = Task {
@@ -55,7 +55,7 @@ trait DocsModule extends DefaultTaskModule {
   }
 
   /** Resolves the final list of modules to be included in the documentation. */
-  def allModules: Seq[ScalaModule] = docRootModule.moduleInternal.modules.collect {
+  def allModules: Seq[ScalaModule] = docRootModule().moduleInternal.modules.collect {
     case m: ScalaModule
         if !m.isInstanceOf[mill.javalib.TestModule]
         && !m.isInstanceOf[ScoverageModule#ScoverageData]
@@ -111,7 +111,7 @@ trait DocsModule extends DefaultTaskModule {
 
     val javaBin = os.Path(sys.props("java.home")) / "bin" / "java"
     os.proc(javaBin, "-cp", docCp.mkString(java.io.File.pathSeparator), "dotty.tools.scaladoc.Main", args)
-      .call(cwd = docRootModule.moduleDir, stdout = os.Inherit, stderr = os.Inherit)
+      .call(cwd = docRootModule().moduleDir, stdout = os.Inherit, stderr = os.Inherit)
   }
 
   private def classDirs: T[Seq[os.Path]] = Task(Task.traverse(allModules)(_.compile)().map(_.classes.path))

@@ -121,6 +121,17 @@ object docs extends MillPluginModule {
   def artifactName = "mill-docs_mill1"
   def mvnDeps      = Seq(mvn"org.typelevel::cats-core:2.13.0", mvn"com.lihaoyi::mill-contrib-scoverage:$millVersion")
 
+  // docRootModule became a ModuleRef[Module] instead of a bare Module so that Mill's resolver no longer
+  // reflects it as a child module (`docs.docRootModule`, which breaks `__` selectors), and the
+  // moduleDirectChildren override that papered over the traversal loop went with it. This is a deliberate
+  // breaking change: consumers must now write `def docRootModule = ModuleRef(build)`.
+  override def mimaBinaryIssueFilters =
+    super.mimaBinaryIssueFilters() ++ Seq(
+      ProblemFilter.exclude[IncompatibleResultTypeProblem]("atn.mill.DocsModule.docRootModule"),
+      ProblemFilter.exclude[ReversedMissingMethodProblem]("atn.mill.DocsModule.docRootModule"),
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.DocsModule.moduleDirectChildren")
+    )
+
   object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(docs)
