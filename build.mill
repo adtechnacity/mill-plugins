@@ -195,3 +195,18 @@ object devx extends MillPluginModule {
     def pluginModules = Seq(devx)
   }
 }
+
+object cpd extends MillPluginModule {
+  def artifactName = "mill-cpd_mill1"
+
+  // Not released yet: nothing to compare against until the first version ships.
+  override def mimaPreviousArtifacts = Task(Seq.empty[Dep])
+
+  object test    extends MillPluginTests {
+    // The unit tests drive UnitTester over the example workspace.
+    def resources = Task.Sources(example.moduleDir / "resources")
+  }
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(cpd)
+  }
+}

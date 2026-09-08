@@ -1,0 +1,41 @@
+package build
+
+import mill._, scalalib._
+import mill.api.ModuleRef
+import atn.mill._
+
+object a extends ScalaModule {
+  def scalaVersion = "3.8.4"
+}
+
+object b extends ScalaModule {
+  def scalaVersion = "3.8.4"
+}
+
+// One workspace-wide CPD entry point. `cpdRootModule` points back at the build root through a `ModuleRef`, so
+// `cpd` discovers every JavaModule in the build (here `a` and `b`) without becoming their parent. Duplications of
+// 25+ tokens are warnings; the error tier starts high (brownfield ratchet) and the Usage block lowers it.
+object cpd extends CpdSupport {
+  def cpdRootModule           = ModuleRef(build)
+  override def cpdErrorTokens = 500
+}
+
+/** Usage
+
+> ./mill resolve __
+...cpd.cpdCheckAll...
+
+> ./mill show cpd
+1
+
+> sed -i 's/cpdErrorTokens *= *500/cpdErrorTokens = 100/' build.mill
+
+> ./mill cpd
+error: ...at or above 100 tokens...
+
+> sed -i '1i// CPD-OFF' b/src/Dup.scala
+
+> ./mill show cpd
+0
+
+*/
