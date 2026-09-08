@@ -180,7 +180,7 @@ object Stryker4sMillRunner:
 
   /** The stryker4s version this plugin is compiled against (used to resolve the matching testrunner artifact). */
   private def stryker4sVersion: String =
-    Option(classOf[Stryker4sRunner].getPackage.getImplementationVersion).getOrElse("0.20.3")
+    Option(classOf[Stryker4sRunner].getPackage.getImplementationVersion).getOrElse("0.21.0")
 
   /** Resolve `stryker4s-sbt-testrunner` (plain Scala 3, sbt-free) with its transitive deps via coursier. */
   private def resolveTestRunnerArtifact(scalaVersion: String): Seq[os.Path] =
