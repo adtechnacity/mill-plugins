@@ -26,6 +26,10 @@ object CpdSupportTest extends TestSuite:
     case Left(f: ExecResult.Failure[?]) => f.msg
     case other                          => throw new java.lang.AssertionError(s"Expected a Result.Failure but got $other")
 
+  /** The failure message `cpdCheckAll` produces for `build` over the example workspace. */
+  private def checkAllFailure(build: CpdRoot): String =
+    UnitTester(build, exampleWorkspace).scoped(eval => failureMessage(eval(build.cpd.cpdCheckAll)))
+
   val tests = Tests:
 
     test("defaults - every knob has the documented default and cpdCheckAll is the default task") {
@@ -55,13 +59,10 @@ object CpdSupportTest extends TestSuite:
     }
 
     test("cpdCheckAll - a cross-module duplicate at or above cpdErrorTokens fails the task") {
-      val build = new DefaultBuild()
-      UnitTester(build, exampleWorkspace).scoped { eval =>
-        val msg = failureMessage(eval(build.cpd.cpdCheckAll))
-        assert(msg.contains("CPD (scala): 1 duplication(s) at or above 75 tokens"))
-        assert(msg.contains("a/src/Dup.scala"))
-        assert(msg.contains("b/src/Dup.scala"))
-      }
+      val msg = checkAllFailure(new DefaultBuild())
+      assert(msg.contains("CPD (scala): 1 duplication(s) at or above 75 tokens"))
+      assert(msg.contains("a/src/Dup.scala"))
+      assert(msg.contains("b/src/Dup.scala"))
     }
 
     test(
@@ -82,8 +83,9 @@ object CpdSupportTest extends TestSuite:
     test("cpdCheckAll - the warning count is cached until an input changes") {
       val build = new LenientBuild()
       UnitTester(build, exampleWorkspace).scoped { eval =>
-        assert(value(eval(build.cpd.cpdCheckAll)) == 1)
+        val first  = eval(build.cpd.cpdCheckAll)
         val second = eval(build.cpd.cpdCheckAll)
+        assert(value(first) == 1)
         assert(second == Right(UnitTester.Result(1, 0)))
       }
     }
@@ -145,22 +147,16 @@ object CpdSupportTest extends TestSuite:
     }
 
     test("cpdErrorTokens below cpdMinimumTokens is a configuration failure") {
-      val build = new BadThresholdsBuild()
-      UnitTester(build, exampleWorkspace).scoped { eval =>
-        val msg = failureMessage(eval(build.cpd.cpdCheckAll))
-        assert(msg.contains("cpdErrorTokens"))
-        assert(msg.contains("cpdMinimumTokens"))
-      }
+      val msg = checkAllFailure(new BadThresholdsBuild())
+      assert(msg.contains("cpdErrorTokens"))
+      assert(msg.contains("cpdMinimumTokens"))
     }
 
     test("cpdOptions - an unknown PMD flag fails with PMD's own usage error and no stack trace") {
-      val build = new BadOptionsBuild()
-      UnitTester(build, exampleWorkspace).scoped { eval =>
-        val msg = failureMessage(eval(build.cpd.cpdCheckAll))
-        assert(msg.contains("CPD (scala) exited 2"))
-        assert(msg.contains("Unknown option: '--no-such-flag'"))
-        assert(!msg.contains("\tat "))
-      }
+      val msg = checkAllFailure(new BadOptionsBuild())
+      assert(msg.contains("CPD (scala) exited 2"))
+      assert(msg.contains("Unknown option: '--no-such-flag'"))
+      assert(!msg.contains("\tat "))
     }
 
 // --- Fixtures: the shape of the example workspace's build.mill, one class per configuration ---
@@ -170,6 +166,8 @@ object CpdSupportTest extends TestSuite:
 // class by Mill's codegen and reflects fine. Each test instantiates its fixture, so every UnitTester gets a
 // fresh module directory.
 abstract class CpdRoot extends TestRootModule:
+  /** The configuration under test; each fixture nests its own `object cpd`. */
+  def cpd: CpdSupport
   object a extends ScalaModule:
     def scalaVersion = "3.8.4"
   object b extends ScalaModule:

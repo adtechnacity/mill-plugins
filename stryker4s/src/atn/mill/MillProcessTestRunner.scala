@@ -133,49 +133,46 @@ object MillProcessTestRunner:
   private val classPathSeparator = java.io.File.pathSeparator
 
   /**
-   * Everything needed to fork one `SbtTestRunnerMain` server: the java arguments (classpath, JVM options, socket
-   * property, main class), the environment added to the build's own, the working directory and the server's log file.
-   * Pure, so the process setup can be tested without spawning anything.
-   */
-  final case class TestRunnerProcess(args: Seq[String], env: Map[String, String], workingDir: os.Path, logFile: os.Path)
-
-  /**
-   * The process specification for a server on `classpath`. `javaOpts` (the test module's `forkArgs` followed by the
+   * What a forked `SbtTestRunnerMain` server is started with. `javaOpts` (the test module's `forkArgs` followed by the
    * stryker options) go between the classpath and the socket property; `env` is the test module's `forkEnv`, so the
    * variables Mill's own runner would set (`MILL_TEST_RESOURCE_DIR`, ...) reach the tests under mutation as well. The
    * server runs in `workingDir` (stryker4s's tmp copy of the sources) but logs to `logDir`: stryker4s deletes the tmp
    * dir at the end of the run while the server may still hold its log open, which on NFS leaves a `.nfsXXXX` entry
    * behind and fails the delete.
    */
-  def processSpec(
+  final case class ServerConfig(
     classpath: Seq[os.Path],
     javaOpts: Seq[String],
     env: Map[String, String],
-    socketPath: os.Path,
     workingDir: os.Path,
     logDir: os.Path
-  ): TestRunnerProcess =
-    val args    = List("-cp", classpath.map(_.toString).mkString(classPathSeparator)) ++
-      javaOpts ++
+  )
+
+  /**
+   * Everything needed to fork one server: the java arguments (classpath, JVM options, socket property, main class), the
+   * environment added to the build's own, the working directory and the server's log file. Pure, so the process setup
+   * can be tested without spawning anything.
+   */
+  final case class TestRunnerProcess(args: Seq[String], env: Map[String, String], workingDir: os.Path, logFile: os.Path)
+
+  /** The process specification for a server started per `server`, listening on `socketPath`. */
+  def processSpec(server: ServerConfig, socketPath: os.Path): TestRunnerProcess =
+    val args    = List("-cp", server.classpath.map(_.toString).mkString(classPathSeparator)) ++
+      server.javaOpts ++
       List(s"-D${TestProcessProperties.unixSocketPath}=$socketPath", "stryker4s.sbt.testrunner.SbtTestRunnerMain")
     // Server output goes to a log file, NEVER an inherited pipe: the initial run streams the whole suite's test
     // output, and a pipe with no active reader would fill up and block the server (and with it the whole run).
-    val logFile = logDir / s"testrunner-${ProcessHandle.current().pid()}-${System.nanoTime()}.log"
-    TestRunnerProcess(args, env, workingDir, logFile)
+    val logFile = server.logDir / s"testrunner-${ProcessHandle.current().pid()}-${System.nanoTime()}.log"
+    TestRunnerProcess(args, server.env, server.workingDir, logFile)
 
   /**
-   * Fork one `SbtTestRunnerMain` server on `classpath` with `env` added to its environment and its output in `logDir`,
-   * connect to it over a fresh unix socket, and hand it the test context. The returned runner is wrapped by the caller
-   * with stryker4s core's timeout/retry decorators.
+   * Fork one server per `server`, connect to it over a fresh unix socket, and hand it the test context. The returned
+   * runner is wrapped by the caller with stryker4s core's timeout/retry decorators.
    */
-  def newProcess(
-    classpath: Seq[os.Path],
-    javaOpts: Seq[String],
-    env: Map[String, String],
-    testGroups: Seq[TestGroup],
-    workingDir: os.Path,
-    logDir: os.Path
-  )(using config: Config, log: Logger): Resource[IO, TestRunner] =
+  def newProcess(server: ServerConfig, testGroups: Seq[TestGroup])(using
+    config: Config,
+    log: Logger
+  ): Resource[IO, TestRunner] =
     for
       socketPath <- Resource.eval(IO.blocking {
                       // Create and delete a temp file, so a known-unique free path exists for the server's socket.
@@ -183,7 +180,7 @@ object MillProcessTestRunner:
                       os.remove(f)
                       f
                     })
-      _          <- createProcess(processSpec(classpath, javaOpts, env, socketPath, workingDir, logDir))
+      _          <- createProcess(processSpec(server, socketPath))
       conn       <- connectWithBackoff(socketPath)
       _          <- Resource.eval(conn.sendMessage(TestProcessContext(testGroups)).void)
     yield new MillProcessTestRunner(conn)

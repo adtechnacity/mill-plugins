@@ -140,36 +140,35 @@ trait PulumiModule extends ScalaModule {
   private def out(line: String): Unit = println(line)
   private def err(line: String): Unit = System.err.println(line)
 
+  /** `builder` with the build's stdout/stderr attached: the one thing every stack operation configures. */
+  private def stdio[B <: com.pulumi.automation.UpdateOptions.Builder[B]](builder: B): B =
+    builder.onStandardOutput(out).onStandardError(err)
+
+  /** One operation on `stack`; the four commands differ only in the verb and its options type. */
+  private def operate(stack: String)(operation: WorkspaceStack => Any) =
+    withStack(stack) { s =>
+      operation(s)
+      ()
+    }
+
   /** Previews the changes an up would apply to the stack. */
   def preview(stack: String = pulumiStack) = Task.Command(exclusive = true) {
-    withStack(stack) { s =>
-      s.preview(PreviewOptions.builder().onStandardOutput(out).onStandardError(err).build())
-      ()
-    }()
+    operate(stack)(_.preview(stdio(PreviewOptions.builder()).build()))()
   }
 
   /** Creates or updates the stack's resources. */
   def up(stack: String = pulumiStack) = Task.Command(exclusive = true) {
-    withStack(stack) { s =>
-      s.up(UpOptions.builder().onStandardOutput(out).onStandardError(err).build())
-      ()
-    }()
+    operate(stack)(_.up(stdio(UpOptions.builder()).build()))()
   }
 
   /** Refreshes the stack's state from the actual infrastructure. */
   def refresh(stack: String = pulumiStack) = Task.Command(exclusive = true) {
-    withStack(stack) { s =>
-      s.refresh(RefreshOptions.builder().onStandardOutput(out).onStandardError(err).build())
-      ()
-    }()
+    operate(stack)(_.refresh(stdio(RefreshOptions.builder()).build()))()
   }
 
   /** Destroys all resources in the stack. */
   def destroy(stack: String = pulumiStack) = Task.Command(exclusive = true) {
-    withStack(stack) { s =>
-      s.destroy(DestroyOptions.builder().onStandardOutput(out).onStandardError(err).build())
-      ()
-    }()
+    operate(stack)(_.destroy(stdio(DestroyOptions.builder()).build()))()
   }
 }
 

@@ -2,10 +2,14 @@ package atn.mill
 
 import utest._
 import upickle.{default => json}
-import org.scalacheck.{Arbitrary, Gen, Prop, Test}
+import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.{forAll, propBoolean}
+import PropertyChecks.checkProp
 
 object CodeSceneTest extends TestSuite:
+
+  /** Serialise `value` to JSON and read it back. */
+  private def roundTrip[A: json.ReadWriter](value: A): A = json.read[A](json.write(value))
 
   // -- Generators --
 
@@ -30,10 +34,6 @@ object CodeSceneTest extends TestSuite:
   given Arbitrary[CodeScene.DevSettingsEntry] = Arbitrary(genDevSettingsEntry)
   given Arbitrary[CodeScene.Developer]        = Arbitrary(genDeveloper)
 
-  private def checkProp(prop: Prop): Unit =
-    val result = Test.check(prop)(identity)
-    assert(result.passed)
-
   val tests = Tests:
 
     test("api - base URL is CodeScene v2 endpoint"):
@@ -43,14 +43,13 @@ object CodeSceneTest extends TestSuite:
 
       test("round-trip serialization identity"):
         checkProp(forAll { (entry: CodeScene.DevSettingsEntry) =>
-          val roundTripped = json.read[CodeScene.DevSettingsEntry](json.write(entry))
+          val roundTripped = roundTrip(entry)
           (roundTripped == entry).label(s"round-trip failed for $entry, got $roundTripped")
         })
 
       test("list round-trip serialization identity"):
         checkProp(forAll(Gen.listOf(genDevSettingsEntry)) { entries =>
-          val roundTripped = json.read[List[CodeScene.DevSettingsEntry]](json.write(entries))
-          (roundTripped == entries).label("list round-trip failed")
+          (roundTrip(entries) == entries).label("list round-trip failed")
         })
 
       test("implements Entry trait with correct field projection"):
@@ -73,10 +72,7 @@ object CodeSceneTest extends TestSuite:
     test("Developer"):
 
       test("round-trip serialization identity"):
-        checkProp(forAll { (dev: CodeScene.Developer) =>
-          val roundTripped = json.read[CodeScene.Developer](json.write(dev))
-          (roundTripped == dev).label(s"round-trip failed for $dev")
-        })
+        checkProp(forAll((dev: CodeScene.Developer) => (roundTrip(dev) == dev).label(s"round-trip failed for $dev")))
 
       test("implements Entry trait with correct field projection"):
         checkProp(forAll { (dev: CodeScene.Developer) =>
@@ -88,12 +84,10 @@ object CodeSceneTest extends TestSuite:
 
       test("emails list length is preserved through serialization"):
         checkProp(forAll { (dev: CodeScene.Developer) =>
-          val roundTripped = json.read[CodeScene.Developer](json.write(dev))
-          (roundTripped.emails.length == dev.emails.length).label("emails length changed")
+          (roundTrip(dev).emails.length == dev.emails.length).label("emails length changed")
         })
 
       test("former_contributor flag is preserved through serialization"):
         checkProp(forAll { (dev: CodeScene.Developer) =>
-          val roundTripped = json.read[CodeScene.Developer](json.write(dev))
-          (roundTripped.former_contributor == dev.former_contributor).label("former_contributor changed")
+          (roundTrip(dev).former_contributor == dev.former_contributor).label("former_contributor changed")
         })

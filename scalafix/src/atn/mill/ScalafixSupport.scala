@@ -47,23 +47,16 @@ trait ScalafixSupport extends ScalaModule:
 
   /** Rewrite sources in place by applying the configured Scalafix rules. */
   def scalafix() = Task.Command[Unit] {
-    ScalafixSupport.runScalafix(
-      log = Task.log,
-      repositories = repositoriesTask(),
-      sources = UpstreamScalafixModule.filesToFix(allSources()).map(_.path),
-      classpath = compileClasspath().map(_.path) ++ Seq(compiledClassesAndSemanticDbFiles().path),
-      scalaVersion = scalaVersion(),
-      scalacOptions = scalacOptions(),
-      scalafixMvnDeps = scalafixMvnDeps(),
-      scalafixToolClasspath = scalafixToolClasspath().map(_.path),
-      scalafixConfig = ScalafixSupport.workspaceScalafixConfig,
-      args = Seq.empty,
-      wd = BuildCtx.workspaceRoot
-    )
+    scalafix0(Seq.empty)()
   }
 
   /** Verify sources are already Scalafix-clean (no rewrites needed). Equivalent to `scalafix --check`. */
   def scalafixCheck() = Task.Command[Unit] {
+    scalafix0(Seq("--check"))()
+  }
+
+  /** The Scalafix run shared by [[scalafix]] and [[scalafixCheck]], parameterised by the extra CLI arguments. */
+  private def scalafix0(args: Seq[String]) = Task.Anon {
     ScalafixSupport.runScalafix(
       log = Task.log,
       repositories = repositoriesTask(),
@@ -74,7 +67,7 @@ trait ScalafixSupport extends ScalaModule:
       scalafixMvnDeps = scalafixMvnDeps(),
       scalafixToolClasspath = scalafixToolClasspath().map(_.path),
       scalafixConfig = ScalafixSupport.workspaceScalafixConfig,
-      args = Seq("--check"),
+      args = args,
       wd = BuildCtx.workspaceRoot
     )
   }

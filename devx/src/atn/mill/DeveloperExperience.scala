@@ -23,35 +23,15 @@ trait DeveloperExperience extends DefaultTaskModule {
   def developerList() =
     Task.Command[Unit] {
       val developers = CodeScene.developers(devSettings.id)
-      developers.foreach { dev =>
-        Task.log.info(s"${dev.name} | team=${dev.team_name} | email=${dev.email} | former=${dev.former_contributor}")
-      }
+      developers.foreach(dev => Task.log.info(formatDeveloper(dev)))
       Task.log.info(s"Total: ${developers.size} developers")
     }
 
   def exportAll(outputDir: String = "codescene-export") =
     Task.Command[Unit] {
-      val dest = os.Path(outputDir, BuildCtx.workspaceRoot)
-
-      // Export developer settings
-      val allSettings = CodeScene.devSettingsRaw
-      writeJson(dest / "developer-settings.json", allSettings)
-
-      val settingsList = CodeScene.devSettings
-      for (setting <- settingsList) {
-        val slug       = slugify(setting.name)
-        val settingDir = dest / "developer-settings" / slug
-        val teamsData  = CodeScene.teamsRaw(setting.id)
-        writeJson(settingDir / "teams.json", teamsData)
-        val devsData   = CodeScene.developersRaw(setting.id)
-        writeJson(settingDir / "developers.json", devsData)
-      }
-
-      // Export all projects
-      val allProjects = CodeScene.projects
-      writeJson(dest / "projects.json", allProjects)
-
-      val projectList = allProjects.obj.get("projects").map(_.arr.toList).getOrElse(List.empty)
+      val dest         = exportDir(outputDir)
+      val settingsList = exportDeveloperSettings(dest)
+      val projectList  = exportProjectList(dest)
       for (p <- projectList) {
         val projectId   = p.obj("id").num.toInt
         val projectName = p.obj("name").str
@@ -64,7 +44,7 @@ trait DeveloperExperience extends DefaultTaskModule {
 
   def exportProject(projectId: Int, outputDir: String = "codescene-export") =
     Task.Command[Unit] {
-      val dest    = os.Path(outputDir, BuildCtx.workspaceRoot)
+      val dest    = exportDir(outputDir)
       val project = CodeScene.project(projectId)
       val name    = project.obj("name").str
       exportProjectData(dest, projectId, name)
@@ -114,6 +94,9 @@ trait DeveloperExperience extends DefaultTaskModule {
         Result.Success(())
       }
     }
+
+  /** An export directory given relative to the workspace root. */
+  private def exportDir(outputDir: String): os.Path = os.Path(outputDir, BuildCtx.workspaceRoot)
 
   private def exportProjectData(dest: os.Path, projectId: Int, projectName: String): Unit = {
     val slug       = slugify(projectName)
@@ -178,6 +161,32 @@ object DeveloperExperience extends ExternalModule with DeveloperExperience {
 
   def slugify(name: String): String =
     name.toLowerCase.replaceAll("[^a-z0-9]+", "-").stripPrefix("-").stripSuffix("-")
+
+  /** One `developerList` line: name, team, email and former-contributor flag. */
+  private[mill] def formatDeveloper(dev: CodeScene.Developer): String =
+    s"${dev.name} | team=${dev.team_name} | email=${dev.email} | former=${dev.former_contributor}"
+
+  /**
+   * The developer-settings half of `exportAll`: `developer-settings.json` plus, per setting,
+   * `developer-settings/<slug>/teams.json` and `developers.json` under `dest`. Returns the settings exported.
+   */
+  private[mill] def exportDeveloperSettings(dest: os.Path): Seq[CodeScene.DevSettingsEntry] = {
+    writeJson(dest / "developer-settings.json", CodeScene.devSettingsRaw)
+    val settingsList = CodeScene.devSettings
+    for (setting <- settingsList) {
+      val settingDir = dest / "developer-settings" / slugify(setting.name)
+      writeJson(settingDir / "teams.json", CodeScene.teamsRaw(setting.id))
+      writeJson(settingDir / "developers.json", CodeScene.developersRaw(setting.id))
+    }
+    settingsList
+  }
+
+  /** The project-list half of `exportAll`: `projects.json` under `dest`. Returns the project entries it lists. */
+  private[mill] def exportProjectList(dest: os.Path): List[ujson.Value] = {
+    val allProjects = CodeScene.projects
+    writeJson(dest / "projects.json", allProjects)
+    allProjects.obj.get("projects").map(_.arr.toList).getOrElse(List.empty)
+  }
 
   def writeJson(path: os.Path, data: ujson.Value): Unit = {
     os.makeDir.all(path / os.up)

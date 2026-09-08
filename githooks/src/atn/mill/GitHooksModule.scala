@@ -82,24 +82,31 @@ trait GitHooksModule extends DefaultTaskModule {
     ScalafmtModule.checkFormatAll()
 
   def prepCommit(evaluator: Evaluator, file: os.Path, source: String = "commit") =
-    Task.Command(exclusive = true)[Unit] {
-      val ev      = EvaluatorProxy(() => evaluator)
-      val modules = validModules(ev.rootModule)
-      val msg     = os.read(file)
-      val gpc     = GitRepo.repo.map(
-        new GitPrepCommit(_, modules.toList, ev.baseLogger, ollamaUrl, ollamaModel, emailDomain, commitFooterPattern)
-      )
-      gpc.map(gpc => os.write.over(file, gpc.prep(msg, source)))
-    }
+    Task.Command(exclusive = true)[Unit](prepCommitMessage(evaluator, file, source))
 
   def validateCommit(evaluator: Evaluator, file: os.Path) =
-    Task.Command(exclusive = true)[Unit] {
-      val ev        = EvaluatorProxy(() => evaluator)
-      val modules   = validModules(ev.rootModule)
-      val validator = GitRepo.repo.map(new GitValidateCommit(_, conventionalCommitTypes, modules, ev.baseLogger))
-      val msg       = os.read(file)
-      validator.flatMap(_.validate(msg))
-    }
+    Task.Command(exclusive = true)[Unit](validateCommitMessage(evaluator, file))
+
+  /** Rewrites the commit message in `file` through [[GitPrepCommit]]. */
+  private def prepCommitMessage(evaluator: Evaluator, file: os.Path, source: String) =
+    val (ev, modules, msg) = commitHookInputs(evaluator, file)
+    val gpc                = GitRepo.repo.map(
+      new GitPrepCommit(_, modules.toList, ev.baseLogger, ollamaUrl, ollamaModel, emailDomain, commitFooterPattern)
+    )
+    gpc.map(gpc => os.write.over(file, gpc.prep(msg, source)))
+
+  /** Validates the commit message in `file` through [[GitValidateCommit]]. */
+  private def validateCommitMessage(evaluator: Evaluator, file: os.Path) =
+    val (ev, modules, msg) = commitHookInputs(evaluator, file)
+    val validator          = GitRepo.repo.map(new GitValidateCommit(_, conventionalCommitTypes, modules, ev.baseLogger))
+    validator.flatMap(_.validate(msg))
+
+  /**
+   * What both commit-message hooks start from: the proxied evaluator, its valid modules and the message file's text.
+   */
+  private def commitHookInputs(evaluator: Evaluator, file: os.Path) =
+    val ev = EvaluatorProxy(() => evaluator)
+    (ev, validModules(ev.rootModule), os.read(file))
 
   /** Task selectors resolved by prePush to run tests before pushing. */
   def prePushTasks: Seq[String] = Seq("__.test")

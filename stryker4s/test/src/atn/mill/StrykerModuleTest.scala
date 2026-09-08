@@ -216,20 +216,30 @@ object StrykerModuleTest extends TestSuite:
       }
     }
 
-object TestStrykerBuild extends TestRootModule with Stryker4sModule:
+/**
+ * The shape every stryker test build shares: pinned versions and a bare utest module, whose fork settings can be
+ * extended.
+ */
+trait TestStrykerModule extends Stryker4sModule:
   def scalaVersion      = "3.8.2"
   def strykerVersion    = "0.19.1"
   def strykerTestModule = test
-  object test extends ScalaTests with TestModule.Utest:
-    override def mvnDeps = Seq.empty
-  lazy val millDiscover: Discover = Discover[this.type]
 
-object TestStrykerForkBuild extends TestRootModule with Stryker4sModule:
-  def scalaVersion      = "3.8.2"
-  def strykerVersion    = "0.19.1"
-  def strykerTestModule = test
+  /** Added to the test module's `forkEnv`. */
+  def extraForkEnv: Map[String, String] = Map.empty
+
+  /** Added to the test module's `forkArgs`. */
+  def extraForkArgs: Seq[String] = Seq.empty
+
   object test extends ScalaTests with TestModule.Utest:
     override def mvnDeps  = Seq.empty
-    override def forkEnv  = Task(super.forkEnv() ++ Map("STRYKER_TEST_FLAG" -> "on"))
-    override def forkArgs = Task(super.forkArgs() ++ Seq("-Dstryker.test=1"))
+    override def forkEnv  = Task(super.forkEnv() ++ extraForkEnv)
+    override def forkArgs = Task(super.forkArgs() ++ extraForkArgs)
+
+object TestStrykerBuild extends TestRootModule with TestStrykerModule:
+  lazy val millDiscover: Discover = Discover[this.type]
+
+object TestStrykerForkBuild extends TestRootModule with TestStrykerModule:
+  override def extraForkEnv       = Map("STRYKER_TEST_FLAG" -> "on")
+  override def extraForkArgs      = Seq("-Dstryker.test=1")
   lazy val millDiscover: Discover = Discover[this.type]

@@ -11,6 +11,21 @@ import mill.api.daemon.ExecResult
  */
 object GitHooksModuleTest extends TestSuite:
 
+  private val dummyLogger = mill.api.daemon.Logger.DummyLogger
+
+  /** Writes the hook `name` into a fresh directory with `install` (built for that directory) and returns the script. */
+  private def hookScript(name: String, install: os.Path => GitInstall)(write: (GitInstall, os.Path) => Unit): String =
+    val dir  = os.temp.dir()
+    val hook = dir / name
+    write(install(dir), hook)
+    os.read(hook)
+
+  private def prePushScript(install: os.Path => GitInstall = new GitInstall(_, dummyLogger)): String =
+    hookScript("pre-push", install)(_.writePrePushHook(_))
+
+  private def preCommitScript(install: os.Path => GitInstall = new GitInstall(_, dummyLogger)): String =
+    hookScript("pre-commit", install)(_.writePreCommitHook(_))
+
   val tests = Tests:
 
     test("headBranch - returns current branch") {
@@ -76,10 +91,7 @@ object GitHooksModuleTest extends TestSuite:
     test("writePrePushHook - aborts the push when the test run fails") {
       // The generated hook calls selective.run/git.prePush directly; without `set -e` a
       // failing test run is masked by the trailing selective.prepare and the push proceeds.
-      val dir    = os.temp.dir()
-      val hook   = dir / "pre-push"
-      new GitInstall(dir, mill.api.daemon.Logger.DummyLogger).writePrePushHook(hook)
-      val script = os.read(hook)
+      val script = prePushScript()
 
       val setEIdx    = script.indexOf("set -e")
       val runIdx     = script.indexOf("selective.run __.test")
@@ -91,11 +103,7 @@ object GitHooksModuleTest extends TestSuite:
     }
 
     test("writePrePushHook - injects prePushExtraCommands as gates before the test run") {
-      val dir    = os.temp.dir()
-      val hook   = dir / "pre-push"
-      new GitInstall(dir, mill.api.daemon.Logger.DummyLogger, prePushExtraCommands = Seq("./mill codeHealth"))
-        .writePrePushHook(hook)
-      val script = os.read(hook)
+      val script = prePushScript(new GitInstall(_, dummyLogger, prePushExtraCommands = Seq("./mill codeHealth")))
 
       val setEIdx = script.indexOf("set -e")
       val gateIdx = script.indexOf("./mill codeHealth")
@@ -109,28 +117,18 @@ object GitHooksModuleTest extends TestSuite:
     test("writePrePushHook - snapshot covers the configured selectiveSnapshotTasks") {
       // The snapshot must be a superset of every selective.run selector; a too-narrow snapshot makes
       // pre-commit's selective format/scalafix run on every module (absent inputs count as changed).
-      val dir    = os.temp.dir()
-      val hook   = dir / "pre-push"
-      new GitInstall(
-        dir,
-        mill.api.daemon.Logger.DummyLogger,
-        selectiveSnapshotTasks = Seq("__.test", "__.checkFormat", "__.scalafixCheck")
-      ).writePrePushHook(hook)
-      val script = os.read(hook)
+      val script = prePushScript(
+        new GitInstall(_, dummyLogger, selectiveSnapshotTasks = Seq("__.test", "__.checkFormat", "__.scalafixCheck"))
+      )
 
       // space-separated varargs to selective.prepare (NOT `+`, which would run them as separate tasks)
       assert(script.contains("selective.prepare __.test __.checkFormat __.scalafixCheck"))
     }
 
     test("writePreCommitHook - selective with full fallback when selectivePreCommitTasks set") {
-      val dir    = os.temp.dir()
-      val hook   = dir / "pre-commit"
-      new GitInstall(
-        dir,
-        mill.api.daemon.Logger.DummyLogger,
-        selectivePreCommitTasks = Seq("__.checkFormat", "__.scalafixCheck")
-      ).writePreCommitHook(hook)
-      val script = os.read(hook)
+      val script = preCommitScript(
+        new GitInstall(_, dummyLogger, selectivePreCommitTasks = Seq("__.checkFormat", "__.scalafixCheck"))
+      )
 
       assert(script.contains("set -e"))
       assert(script.contains("if [ -f \"$SELECTIVE_JSON\" ]; then"))
@@ -140,10 +138,7 @@ object GitHooksModuleTest extends TestSuite:
     }
 
     test("writePreCommitHook - keeps legacy git.preCommit when selectivePreCommitTasks empty") {
-      val dir    = os.temp.dir()
-      val hook   = dir / "pre-commit"
-      new GitInstall(dir, mill.api.daemon.Logger.DummyLogger).writePreCommitHook(hook)
-      val script = os.read(hook)
+      val script = preCommitScript()
 
       assert(script.contains("git.preCommit"))
       assert(!script.contains("selective.run")) // no selective block in the legacy path

@@ -19,6 +19,9 @@ object DeveloperExperienceIntegrationTest extends TestSuite:
     Option(System.getenv("PORT_CLIENT_ID")).exists(_.nonEmpty) &&
     Option(System.getenv("PORT_CLIENT_SECRET")).exists(_.nonEmpty)
 
+  /** The id of the first project the live API lists. */
+  private def firstProjectId: Int = CodeScene.projects.obj("projects").arr.head.obj("id").num.toInt
+
   val tests = Tests:
 
     // -- CodeScene API integration tests --
@@ -89,9 +92,7 @@ object DeveloperExperienceIntegrationTest extends TestSuite:
       test("project - returns valid data for first project"):
         if !hasCodeSceneToken then "skipped - no CS_ACCESS_TOKEN"
         else
-          val projects = CodeScene.projects
-          val firstId  = projects.obj("projects").arr.head.obj("id").num.toInt
-          val project  = CodeScene.project(firstId)
+          val project = CodeScene.project(firstProjectId)
           assert(project.obj.contains("name"))
           assert(project.obj.contains("id"))
           s"Project: ${project.obj("name").str}"
@@ -99,9 +100,7 @@ object DeveloperExperienceIntegrationTest extends TestSuite:
       test("latestAnalysis - returns data for first project"):
         if !hasCodeSceneToken then "skipped - no CS_ACCESS_TOKEN"
         else
-          val projects = CodeScene.projects
-          val firstId  = projects.obj("projects").arr.head.obj("id").num.toInt
-          val analysis = CodeScene.latestAnalysis(firstId)
+          val analysis = CodeScene.latestAnalysis(firstProjectId)
           assert(analysis.obj.nonEmpty)
 
     // -- PortIO integration tests --
@@ -152,34 +151,17 @@ object DeveloperExperienceIntegrationTest extends TestSuite:
           import DeveloperExperience.*
           val tmp = os.temp.dir()
 
-          // Export developer settings
-          val allSettings = CodeScene.devSettingsRaw
-          writeJson(tmp / "developer-settings.json", allSettings)
+          // The production halves of exportAll, then verify the structure they write
+          val settingsList = exportDeveloperSettings(tmp)
           assert(os.exists(tmp / "developer-settings.json"))
-
-          val settingsList = CodeScene.devSettings
-          for (setting <- settingsList) {
-            val slug       = slugify(setting.name)
-            val settingDir = tmp / "developer-settings" / slug
-            val teamsData  = CodeScene.teamsRaw(setting.id)
-            writeJson(settingDir / "teams.json", teamsData)
-            val devsData   = CodeScene.developersRaw(setting.id)
-            writeJson(settingDir / "developers.json", devsData)
-          }
-
-          // Verify structure
           settingsList.foreach { setting =>
             val slug = slugify(setting.name)
             assert(os.exists(tmp / "developer-settings" / slug / "teams.json"))
             assert(os.exists(tmp / "developer-settings" / slug / "developers.json"))
           }
 
-          // Export projects list
-          val allProjects = CodeScene.projects
-          writeJson(tmp / "projects.json", allProjects)
+          val projectList = exportProjectList(tmp)
           assert(os.exists(tmp / "projects.json"))
-
-          val projectList = allProjects.obj.get("projects").map(_.arr.toList).getOrElse(List.empty)
           s"Exported ${settingsList.size} settings, ${projectList.size} projects"
 
       test("exportProject - fetches and writes project data"):
@@ -209,9 +191,5 @@ object DeveloperExperienceIntegrationTest extends TestSuite:
           assert(settings.nonEmpty)
           val developers = CodeScene.developers(settings.head.id)
           assert(developers.nonEmpty)
-          developers.foreach { dev =>
-            val formatted =
-              s"${dev.name} | team=${dev.team_name} | email=${dev.email} | former=${dev.former_contributor}"
-            assert(formatted.nonEmpty)
-          }
+          developers.foreach(dev => assert(DeveloperExperience.formatDeveloper(dev).nonEmpty))
           s"${developers.size} developers formatted successfully"

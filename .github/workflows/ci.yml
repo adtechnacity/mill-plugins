@@ -57,15 +57,15 @@ jobs:
       - name: CPD
         run: ./mill duplication
 
-      # The thresholds must match `object duplication` in build.mill (cpdMinimumTokens / cpdErrorTokens are plain
-      # defs, not tasks, so they cannot be read through `./mill show`).
+      # The thresholds must match `object duplication` in build.mill, which uses CpdSupport's defaults
+      # (cpdMinimumTokens / cpdErrorTokens are plain defs, not tasks, so they cannot be read through `./mill show`).
       - name: Post CPD
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          python3 .github/scripts/quality-report.py cpd --report-dir out/duplication/cpdCheckAll.dest --warn 25 --error 107 \
+          python3 .github/scripts/quality-report.py cpd --report-dir out/duplication/cpdCheckAll.dest --warn 25 --error 75 \
             | python3 .github/scripts/quality-report.py post --section cpd --pr ${{ github.event.pull_request.number }}
 
       # Example workspaces run a forked Mill against the locally published plugins (~5 min).
