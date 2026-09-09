@@ -109,6 +109,12 @@ object ReleaseModuleTest extends TestSuite:
     assert(outcome.fileAt(tag, "CHANGELOG.md") == outcome.changelogFile)
     assert(outcome.changelogFile.startsWith(s"# Changelog\n\n## [$released] - $today\n"))
 
+  /** Releasing `feat: a`, `breaking` and `chore: c` after `v1.2.3` bumps the major and lists `drop b` as breaking. */
+  private def assertBreakingRelease(breaking: String): Unit =
+    val outcome = run(taggedV123("feat: a", breaking, "chore: c"))(_.release())
+    assertReleased(outcome, "v2.0.0", "2.0.1-SNAPSHOT")
+    assert(outcome.changelogFile.contains("### Breaking Changes\n\n- drop b\n"))
+
   val tests = Tests:
 
     test("defaults - release is the default task, files sit at the workspace root, the repository is GitRepo's"):
@@ -133,9 +139,10 @@ object ReleaseModuleTest extends TestSuite:
       assertReleased(run(fixAndFeat)(_.major()), "v2.0.0", "2.0.1-SNAPSHOT")
 
     test("release - a breaking commit among feats and fixes bumps the major"):
-      val outcome = run(taggedV123("feat: a", "fix!: drop b", "chore: c"))(_.release())
-      assertReleased(outcome, "v2.0.0", "2.0.1-SNAPSHOT")
-      assert(outcome.changelogFile.contains("### Breaking Changes\n\n- drop b\n"))
+      assertBreakingRelease("fix!: drop b")
+
+    test("release - a BREAKING CHANGE footer bumps the major like the bang does"):
+      assertBreakingRelease("fix: drop b\n\nExplains the change.\n\nBREAKING CHANGE: b is gone")
 
     test("release - a feat without breaking changes bumps the minor"):
       assertReleased(run(fixAndFeat)(_.release()), "v1.3.0", "1.3.1-SNAPSHOT")
@@ -178,13 +185,11 @@ object ReleaseModuleTest extends TestSuite:
       assert(outcome.changelogFile == expected)
       assert(outcome.messages == List("fix: new", "feat: old"))
 
-    test("tagPrefix - names the new tag and ignores tags carrying another prefix"):
-      // Tags with the custom prefix are not parsed as versions yet (SemVer.parse only strips `v`), so a first
-      // release under `release-` starts from 0.0.0 even next to `v5.0.0`, and every commit counts as unreleased.
-      val repo    = Scripted().commit("chore: initial").tag("v5.0.0").commit("fix: a")
-      val outcome = run(repo, PrefixedBuild())(_.patch())
-      assertReleased(outcome, "release-0.0.1", "0.0.2-SNAPSHOT")
-      assert(outcome.changelogFile.contains("### Fixed\n\n- a\n\n### Other\n\n- initial\n"))
+    test("tagPrefix - names the new tag, reads the last version from it and ignores tags carrying another prefix"):
+      val repo    = Scripted().commit("chore: initial").tag("release-1.2.3").tag("v5.0.0").commit("fix: a")
+      val outcome = run(repo, PrefixedBuild())(_.release())
+      assertReleased(outcome, "release-1.2.4", "1.2.5-SNAPSHOT")
+      assert(outcome.changelogFile == s"# Changelog\n\n## [1.2.4] - $today\n\n### Fixed\n\n- a\n")
 
     test("typeMapping - the changelog follows the module's mapping"):
       val repo    = Scripted().commit("chore: initial").tag("v1.0.0").commit("docs: explain").version("1.0.1-SNAPSHOT")
