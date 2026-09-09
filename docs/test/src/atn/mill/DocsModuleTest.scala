@@ -4,6 +4,7 @@ import utest._
 import mill._
 import mill.api.{Discover, ModuleRef, Result, SelectMode}
 import mill.testkit.{TestRootModule, UnitTester}
+import mill.contrib.scoverage.ScoverageModule
 import mill.scalalib._
 
 object DocsModuleTest extends TestSuite:
@@ -29,7 +30,9 @@ object DocsModuleTest extends TestSuite:
       assert(BasicDocsBuild.docs.moduleDirectChildren.isEmpty)
     }
 
-    test("DocsModule.allModules - discovers ScalaModules under docRootModule") {
+    test("DocsModule.allModules - discovers ScalaModules under docRootModule, skipping test, scoverage and excluded") {
+      val discovered = BasicDocsBuild.moduleInternal.modules.map(_.moduleSegments.render).toSet
+      assert(discovered == Set("", "basic", "basic.test", "basic.scoverage", "excluded", "docs"))
       assert(BasicDocsBuild.docs.allModules.map(_.moduleSegments.render).toSet == Set("basic"))
     }
 
@@ -51,7 +54,8 @@ object DocsModuleTest extends TestSuite:
         }
         eval.evaluator.resolveTasks(Seq("__.compile"), SelectMode.Multi) match {
           case Result.Success(tasks) =>
-            assert(tasks.map(_.toString).toSet == Set("basic.compile", "excluded.compile"))
+            val expected = Set("basic.compile", "basic.test.compile", "basic.scoverage.compile", "excluded.compile")
+            assert(tasks.map(_.toString).toSet == expected)
           case f: Result.Failure     =>
             throw new java.lang.AssertionError(s"resolve __.compile failed: ${f.error}")
         }
@@ -67,8 +71,12 @@ abstract class BasicDocsRoot extends TestRootModule:
   object excluded extends ScalaModule:
     def scalaVersion = "3.8.2"
 
-  object basic extends ScalaModule:
-    def scalaVersion = "3.8.2"
+  object basic extends ScalaModule with ScoverageModule:
+    def scalaVersion     = "3.8.2"
+    def scoverageVersion = "2.5.2"
+
+    object test extends ScalaTests:
+      def testFramework = "utest.runner.Framework"
 
   object docs extends DocsModule:
     def docProjectName           = "test-project"

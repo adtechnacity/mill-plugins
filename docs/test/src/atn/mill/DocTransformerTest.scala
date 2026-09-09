@@ -62,6 +62,17 @@ object DocTransformerTest extends TestSuite:
       }
     }
 
+    test("FrontMatter.fields") {
+      test("fromMap keeps the given fields") {
+        val fields = Map("title" -> "My Page", "sidebar_position" -> "2")
+        assert(FrontMatter.fromMap(fields).fields == fields)
+      }
+      test("isEmpty only for the empty frontmatter") {
+        assert(FrontMatter.empty.isEmpty)
+        assert(!FrontMatter("title" -> "My Page").isEmpty)
+      }
+    }
+
     test("parseSplitMarker") {
       test("extracts YAML fields") {
         val line   = "<!-- split: title: Kafka Topics -->"
@@ -86,8 +97,9 @@ object DocTransformerTest extends TestSuite:
     }
 
     test("splitDocument") {
-      test("no markers returns single section") {
-        val content  = "# Title\n\nSome content\n"
+      test("no markers returns the content verbatim as a single section") {
+        // No trailing newline: the pass-through must not re-join the lines.
+        val content  = "# Title\n\nSome content"
         val sections = SplitMarker.splitDocument(content).toVector
         assert(sections.length == 1)
         assert(sections.head._1 == FrontMatter.empty)

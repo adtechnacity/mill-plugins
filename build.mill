@@ -116,9 +116,13 @@ object duplication extends CpdSupport {
   def cpdRootModule = ModuleRef(build)
 }
 
-object core extends MillPluginModule {
+object core extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-core_mill1"
   def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3", mvn"org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r")
+
+  def strykerTestModule = test
+
+  object test extends MillPluginTests
 }
 
 object stryker4s extends MillPluginModule with MillPluginMutation {

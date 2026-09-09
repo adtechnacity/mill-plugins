@@ -120,10 +120,18 @@ trait PulumiModule extends ScalaModule {
   override def generatedSources = Task(super.generatedSources() ++ pulumiPackageSdks().map(p => PathRef(p.path / "java")))
 
   override def resources = Task {
-    super.resources() ++ pulumiPackageSdks()
-      .map(p => PathRef(p.path / "resources"))
-      .filter(p => os.exists(p.path))
+    super.resources() ++ pulumiPackageSdks().map(p => PathRef(p.path / "resources")).filter(existing)
   }
+
+  // A named predicate rather than a lambda: stryker4s rolls back the uncompilable `os.forall` mutant it would nest
+  // inside the filter's own mutant, and that rollback drops the filter's original arm (MatchError on the initial run).
+  private def existing(resources: PathRef): Boolean = os.exists(resources.path)
+
+  /**
+   * Options of the Automation API workspace before the environment is attached. Builds use the pulumi CLI on PATH; a
+   * test hands the API a stand-in [[com.pulumi.automation.PulumiCommand]] through this hook.
+   */
+  private[mill] def workspaceOptions: LocalWorkspaceOptions.Builder = LocalWorkspaceOptions.builder()
 
   private def withStack(stack: String)(f: WorkspaceStack => Unit) = Task.Anon {
     val packages = pulumiLocalPackages.map { case (n, s) => n -> resolveSource(s) }
@@ -132,7 +140,7 @@ trait PulumiModule extends ScalaModule {
         pulumiProjectDir / "Pulumi.yaml",
         PulumiModule.projectYaml(pulumiProjectName, assembly().path, packages)
       )
-      val opts = LocalWorkspaceOptions.builder().environmentVariables((Task.env ++ pulumiEnv).asJava).build()
+      val opts = workspaceOptions.environmentVariables((Task.env ++ pulumiEnv).asJava).build()
       Using.resource(LocalWorkspace.createOrSelectStack(stack, pulumiProjectDir.toNIO, opts))(f)
     }
   }
