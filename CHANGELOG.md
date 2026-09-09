@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.1] - 2026-09-09
+
+### Fixed
+
+- **stryker4s**: upgrade to stryker4s-core 0.21.0 so compile-error rollback matches the compiled text (#16)
+
+### Other
+
+- explicit empty states in the quality report and a race-safe sticky-comment post
+- bump the stryker4s pin to 1.1.0 and activate cpd mutation and the file-level delta
+- set next development version 1.1.1-SNAPSHOT
+
 ## [1.1.0] - 2026-09-08
 
 ### Added
