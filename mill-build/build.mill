@@ -4,11 +4,10 @@ object `package` extends meta.MillBuildRootModule {
   def mvnDeps = Seq(
     mvn"com.lihaoyi::mill-contrib-versionfile:${mill.util.BuildInfo.millVersion}",
     mvn"com.lihaoyi::mill-contrib-scoverage:${mill.util.BuildInfo.millVersion}",
-    // Dogfooded releases of this repo's own plugins. mill-stryker4s 1.1.0 forwards the test module's forkEnv, reports
+    // Dogfooded releases of this repo's own plugins. mill-stryker4s 1.1.1 forwards the test module's forkEnv, reports
     // compiler errors per mutant and scopes a run with strykerIncludedFiles (see MillPluginMutation in build.mill).
-    // The excluded mutators additionally need the release that embeds stryker4s-core 0.21.0.
     mvn"com.adtechnacity::mill-release::0.2.1",
-    mvn"com.adtechnacity::mill-stryker4s::1.1.0",
+    mvn"com.adtechnacity::mill-stryker4s::1.1.1",
     mvn"com.adtechnacity::mill-cpd::1.0.0",
     mvn"com.github.lolgab::mill-mima::0.2.1"
   )

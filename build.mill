@@ -86,23 +86,13 @@ trait MillPluginModule extends ScalaModule with PublishModule with Mima with Sco
 trait MillPluginMutation extends Stryker4sModule {
   def strykerVersion = "0.21.0"
 
-  // Two mutators produce mutants that os-lib rejects at compile time: MethodExpression turns `os.exists(p)` into
-  // `os.forall(p)` (no such member) and StringLiteral turns `dir / "name"` into `dir / ""` (the path-segment macro
-  // fails on an empty literal). The 1.1.0 runner reports one CompilerErrMsg per scalac error, but stryker4s 0.20.4
-  // matches its line against a re-parse of `mutatedSource.syntax` (comments stripped) while the file scalac compiled
-  // was printed with `printSyntaxFor` (comments kept), so every comment line above the mutant shifts the match onto
-  // the wrong mutation switch: the wrong mutants are rolled back, the single retry hits the same error and the module
-  // aborts (UnableToFixCompilerErrorsException). Seen with mutant 6 of cpd/src/atn/mill/CpdSupport.scala (StringLiteral
-  // on `Task.dest / s"cpd-$language.csv"`, 24 comment lines above it) and a `/ ""` mutant in
-  // devx/src/atn/mill/DeveloperExperience.scala. Upstream stryker-mutator/stryker4s#2011, fixed in stryker4s-core
-  // 0.21.0 (this module now builds against it), but the published runner this build pins still embeds 0.20.4, so the
-  // mutators stay excluded rather than the files. TODO drop after the pin bump to the release containing
-  // stryker4s-core 0.21.0. Intended final config:
-  //   - no exclusion here: MethodExpression mutants roll back on their own;
-  //   - on `devx` only, `override def strykerExcludedMutations = Seq("StringLiteral")`: scalac reports one
-  //     macro-expansion error per compile, so its `os.Path / ""` mutants cannot all be rolled back in the one retry
-  //     stryker4s allows.
-  override def strykerExcludedMutations = Seq("MethodExpression", "StringLiteral")
+  // Uncompilable mutants are rolled back per line by stryker4s-core 0.21.0, which the pinned runner embeds (upstream
+  // stryker-mutator/stryker4s#2011): MethodExpression's `os.forall` fails typing, and typer reports every such error
+  // in one compile, so one rollback pass fixes them all. StringLiteral stays excluded by default: its `dir / ""`
+  // mutants fail os-lib's path-segment macro, and scalac reports only one macro-expansion error per compile, so a
+  // module with two such literals (or one plus a typing error) exhausts the single retry stryker4s allows - release
+  // aborts with UnableToFixCompilerErrorsException. Only cpd opts back in (see its override).
+  override def strykerExcludedMutations = Seq("StringLiteral")
 
   // File-level delta: CI exports STRYKER_INCLUDED_FILES (comma-separated, relative to the workspace root) so a PR
   // only mutates the files it touched; unset or empty, the whole module is mutated.
@@ -278,6 +268,11 @@ object cpd extends MillPluginModule with MillPluginMutation {
 
   // First released in 1.0.0, so that is the baseline rather than the repo-wide 0.3.0.
   override def mimaPreviousVersions = Seq("1.0.0")
+
+  // The one module StringLiteral can run on: CpdSupport.scala has a single os.Path literal segment, so its lone
+  // `Task.dest / ""` mutant is the only macro-expansion rollback the run needs. A second such literal (or an
+  // `os.exists` for MethodExpression to turn into `os.forall`) exhausts the single retry: drop this override then.
+  override def strykerExcludedMutations = Seq.empty
 
   def strykerTestModule = test
 
