@@ -20,6 +20,9 @@ object CodeScene {
   /** Environment variable name for the CodeScene API access token. */
   var csAccessTokenEnvVar: String = "CS_ACCESS_TOKEN"
 
+  /** Environment lookup behind [[token]]: `System.getenv`, unless a test substitutes a fixed map. */
+  var getenv: String => Option[String] = name => Option(System.getenv(name))
+
   // --- Models ---
 
   /**
@@ -62,14 +65,15 @@ object CodeScene {
 
   // --- Internal plumbing ---
 
-  val api = "https://api.codescene.io/v2"
+  /** Base URL of the CodeScene REST API (v2). Reassignable so tests can point the client at a local server. */
+  var api: String = "https://api.codescene.io/v2"
 
   private val DevSettings    = "/developer-settings"
   private val Projects       = "/projects"
   private val AnalysesLatest = "/analyses/latest"
   private val JsonContent    = "Content-Type" -> "application/json"
 
-  def token = Option(System.getenv(csAccessTokenEnvVar))
+  def token = getenv(csAccessTokenEnvVar)
     .filter(_.nonEmpty)
     .getOrElse(throw new RuntimeException(s"Environment variable $csAccessTokenEnvVar is not set or empty"))
 

@@ -4,12 +4,9 @@ import utest._
 import upickle.{default => json}
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.{forAll, propBoolean}
-import PropertyChecks.checkProp
+import PropertyChecks.{checkProp, roundTrip}
 
 object CodeSceneTest extends TestSuite:
-
-  /** Serialise `value` to JSON and read it back. */
-  private def roundTrip[A: json.ReadWriter](value: A): A = json.read[A](json.write(value))
 
   // -- Generators --
 
