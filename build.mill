@@ -84,7 +84,7 @@ trait MillPluginModule extends ScalaModule with PublishModule with Mima with Sco
 
 /** Mutation testing of a plugin module with the published mill-stryker4s: `./mill <module>.strykerMutate`. */
 trait MillPluginMutation extends Stryker4sModule {
-  def strykerVersion = "0.20.4"
+  def strykerVersion = "0.21.0"
 
   // Two mutators produce mutants that os-lib rejects at compile time: MethodExpression turns `os.exists(p)` into
   // `os.forall(p)` (no such member) and StringLiteral turns `dir / "name"` into `dir / ""` (the path-segment macro
@@ -94,8 +94,14 @@ trait MillPluginMutation extends Stryker4sModule {
   // the wrong mutation switch: the wrong mutants are rolled back, the single retry hits the same error and the module
   // aborts (UnableToFixCompilerErrorsException). Seen with mutant 6 of cpd/src/atn/mill/CpdSupport.scala (StringLiteral
   // on `Task.dest / s"cpd-$language.csv"`, 24 comment lines above it) and a `/ ""` mutant in
-  // devx/src/atn/mill/DeveloperExperience.scala. Both patterns occur in nearly every plugin, so the mutators stay
-  // excluded rather than the files until the runner maps scalac's lines onto the re-parsed text.
+  // devx/src/atn/mill/DeveloperExperience.scala. Upstream stryker-mutator/stryker4s#2011, fixed in stryker4s-core
+  // 0.21.0 (this module now builds against it), but the published runner this build pins still embeds 0.20.4, so the
+  // mutators stay excluded rather than the files. TODO drop after the pin bump to the release containing
+  // stryker4s-core 0.21.0. Intended final config:
+  //   - no exclusion here: MethodExpression mutants roll back on their own;
+  //   - on `devx` only, `override def strykerExcludedMutations = Seq("StringLiteral")`: scalac reports one
+  //     macro-expansion error per compile, so its `os.Path / ""` mutants cannot all be rolled back in the one retry
+  //     stryker4s allows.
   override def strykerExcludedMutations = Seq("MethodExpression", "StringLiteral")
 
   // File-level delta: CI exports STRYKER_INCLUDED_FILES (comma-separated, relative to the workspace root) so a PR
@@ -129,8 +135,8 @@ object stryker4s extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-stryker4s_mill1"
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
-    mvn"io.stryker-mutator::stryker4s-core:0.20.4",
-    mvn"io.stryker-mutator::stryker4s-command-runner:0.20.4",
+    mvn"io.stryker-mutator::stryker4s-core:0.21.0",
+    mvn"io.stryker-mutator::stryker4s-command-runner:0.21.0",
     mvn"co.fs2::fs2-core:3.13.0"
   )
 
