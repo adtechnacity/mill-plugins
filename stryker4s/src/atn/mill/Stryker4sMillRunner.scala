@@ -182,17 +182,19 @@ object Stryker4sMillRunner:
   private def stryker4sVersion: String =
     Option(classOf[Stryker4sRunner].getPackage.getImplementationVersion).getOrElse("0.21.0")
 
-  /** Resolve `stryker4s-sbt-testrunner` (plain Scala 3, sbt-free) with its transitive deps via coursier. */
-  private def resolveTestRunnerArtifact(scalaVersion: String): Seq[os.Path] =
-    val scalaBinary = if scalaVersion.startsWith("3") then "3" else scalaVersion.split('.').take(2).mkString(".")
+  /**
+   * Resolve `stryker4s-sbt-testrunner` (plain Scala 3, sbt-free) with its transitive deps via coursier. Package-private
+   * so the tests can check what ends up on the server's classpath.
+   */
+  private[mill] def resolveTestRunnerArtifact(scalaVersion: String): Seq[os.Path] =
     @annotation.nowarn("msg=deprecated")
-    val files       = coursier
+    val files = coursier
       .Fetch()
       .addDependencies(
         coursier.Dependency(
           coursier.Module(
             coursier.Organization("io.stryker-mutator"),
-            coursier.ModuleName(s"stryker4s-sbt-testrunner_$scalaBinary")
+            coursier.ModuleName(s"stryker4s-sbt-testrunner_${StrykerModule.scalaBinaryVersion(scalaVersion)}")
           ),
           stryker4sVersion
         )
@@ -209,8 +211,9 @@ object Stryker4sMillRunner:
    * Build the [[TestProcessContext]] test groups the server runs: one group for the module's framework, one
    * [[TaskDefinition]] per discovered test class. The framework is loaded in a throwaway classloader over the test
    * classpath purely to read its fingerprint (same fingerprint for every class, as test discovery already ran in Mill).
+   * Package-private so the tests can check the groups without forking a server.
    */
-  private def buildTestGroups(
+  private[mill] def buildTestGroups(
     testClasspath: Seq[os.Path],
     frameworkName: String,
     testClasses: Seq[String]

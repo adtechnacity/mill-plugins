@@ -61,7 +61,8 @@ object MillTestRunnerConnection:
  * Mill port of stryker4s' sbt-plugin `ProcessTestRunner` (Apache-2.0): drives one long-lived forked `SbtTestRunnerMain`
  * server over a socket. The server activates mutations in-process (no JVM start per mutant), runs ONLY the tests
  * covering each mutant, fails early on the first kill, and collects per-test coverage during the initial run — which is
- * what lets stryker4s core hand each mutant its covering tests.
+ * what lets stryker4s core hand each mutant its covering tests. The message mapping is what the tests script a stand-in
+ * server for; [[MillProcessTestRunner.newProcess]] is exercised against the real server.
  */
 class MillProcessTestRunner(testProcess: MillTestRunnerConnection) extends TestRunner:
 

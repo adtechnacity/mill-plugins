@@ -108,6 +108,13 @@ object StrykerModuleTest extends TestSuite:
       assert(StrykerModule.compilerArtifactName("2.12.20") == "scala-compiler")
     }
 
+    test("scalaBinaryVersion - one testrunner artifact for all of Scala 3, one per Scala 2 minor") {
+      assert(StrykerModule.scalaBinaryVersion("3.8.4") == "3")
+      assert(StrykerModule.scalaBinaryVersion("3.3.7") == "3")
+      assert(StrykerModule.scalaBinaryVersion("2.13.16") == "2.13")
+      assert(StrykerModule.scalaBinaryVersion("2.12.20") == "2.12")
+    }
+
     test("compilerMainClass - matches the compiler artifact for each Scala major") {
       // Resolving scala-compiler but invoking dotty.tools.dotc.Main fails with
       // "Could not find or load main class", so these two must agree.
@@ -180,6 +187,27 @@ object StrykerModuleTest extends TestSuite:
       val opts     = Seq("-Xfatal-warnings", "-deprecation", "-Wunused:all", "-Yexplicit-nulls")
       val filtered = StrykerModule.filterScalacOptions(opts)
       assert(filtered == Seq("-deprecation", "-Yexplicit-nulls"))
+    }
+
+    test("mirrorSources - copies only the .scala files, keeping the workspace-relative layout, one root per dir") {
+      val ws       = os.temp.dir()
+      val dest     = os.temp.dir()
+      os.write(ws / "m" / "src" / "a" / "A.scala", "object A", createFolders = true)
+      os.write(ws / "m" / "src" / "a" / "notes.md", "skip", createFolders = true)
+      os.write(ws / "m" / "gen" / "B.scala", "object B", createFolders = true)
+      os.makeDir.all(ws / "m" / "empty")
+      val mirrored = StrykerModule.mirrorSources(Seq(ws / "m" / "src", ws / "m" / "gen", ws / "m" / "empty"), ws, dest)
+      assert(mirrored == Seq(dest / "m" / "src", dest / "m" / "gen", dest / "m" / "empty"))
+      val copied   = os.walk(dest).filter(os.isFile).map(_.relativeTo(dest).toString).sorted
+      assert(copied == Seq("m/gen/B.scala", "m/src/a/A.scala"))
+      assert(os.read(dest / "m" / "src" / "a" / "A.scala") == "object A")
+      // A root without sources is still mirrored: stryker4s's mutate globs point at it.
+      assert(os.isDir(dest / "m" / "empty"))
+    }
+
+    test("Stryker4sModule - nothing excluded by default; strykerMutate runs exclusively") {
+      assert(TestStrykerBuild.strykerExcludedFiles.isEmpty)
+      assert(TestStrykerBuild.strykerMutate().exclusive)
     }
 
     test("Stryker4sModule - strykerConf task generates config") {

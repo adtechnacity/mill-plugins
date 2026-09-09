@@ -132,7 +132,11 @@ object stryker4s extends MillPluginModule with MillPluginMutation {
 
   def strykerTestModule = test
 
-  object test    extends MillPluginTests
+  object test    extends MillPluginTests {
+    // The runner tests fork the real `SbtTestRunnerMain` server, and the fixture suite it runs calls the
+    // `stryker4s.coverage` / `stryker4s.activeMutation` runtime instrumented code would: both live in the testrunner.
+    def mvnDeps = Task { super.mvnDeps() ++ Seq(mvn"io.stryker-mutator::stryker4s-sbt-testrunner:0.21.0") }
+  }
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(core, stryker4s)
   }
