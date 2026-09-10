@@ -66,12 +66,6 @@ object ConventionalCommitTest extends TestSuite:
     test("parse - a malformed first line returns None"):
       for message <- malformed do assert(ConventionalCommit.parse("h", message).isEmpty)
 
-    test("parse - a BREAKING CHANGE footer marks the commit breaking, in either spelling"):
-      val expected = Some(ConventionalCommit("h", "feat", Some("core"), true, "add thing"))
-      val body     = "feat(core): add thing\n\nExplains the change.\n\n"
-      assert(ConventionalCommit.parse("h", s"${body}BREAKING CHANGE: the old api is gone") == expected)
-      assert(ConventionalCommit.parse("h", s"${body}BREAKING-CHANGE: the old api is gone") == expected)
-
     test(
       "parse - prose mentioning a breaking change is no footer: the token must open a line, uppercase, with a colon"
     ):
@@ -91,12 +85,12 @@ object ConventionalCommitTest extends TestSuite:
         ConventionalCommit.parse("h", (line :: body).mkString("\n")) == ConventionalCommit.parse("h", line)
       })
 
-    test("property - the bang and the footer are each sufficient to mark a commit breaking"):
+    test("property - the bang and the footer are each sufficient to mark a commit breaking, changing nothing else"):
       holds(forAll(genHeader, genBody, genFooterToken, genDescription) {
         case ((typ, scope, bang, description), body, token, note) =>
           val line       = header(typ, scope, bang, description)
           val plain      = (line :: body).mkString("\n")
           val withFooter = (line :: body ::: List("", s"$token: $note")).mkString("\n")
           ConventionalCommit.parse("h", plain).map(_.breaking) == Some(bang)
-          && ConventionalCommit.parse("h", withFooter).map(_.breaking) == Some(true)
+          && ConventionalCommit.parse("h", withFooter) == ConventionalCommit.parse("h", line).map(_.copy(breaking = true))
       })
