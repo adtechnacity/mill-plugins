@@ -103,8 +103,9 @@ jobs:
       - name: Binary compatibility check
         run: ./mill __.mimaReportBinaryIssues
 
-  # Mutation score of the PR's delta: every module with a changed .scala file
-  # that has a mutation-tested test module is run through stryker4s.
+  # Mutation score of the PR's delta: every mutation-tested module whose src,
+  # test or resources tree changed is run through stryker4s, restricted to its
+  # changed production sources when it has any (mutated whole otherwise).
   mutation:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -133,31 +134,40 @@ jobs:
           key: ${{ runner.os }}-mill-${{ hashFiles('.mill-version') }}
           restore-keys: ${{ runner.os }}-mill-
 
+      # A module is selected when the PR changes anything under its src, test or resources tree (example workspaces
+      # and the build files do not count) and it has a strykerMutate task. Its scope is its changed .scala files under
+      # <module>/src; a module without any (tests or resources only) gets an empty scope and is mutated whole.
       - name: Changed modules
         id: changed
         run: |
-          files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- '*.scala' | sort -u)
-          changed=$(cut -d/ -f1 <<<"$files" | sort -u)
+          files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | sort -u)
+          changed=$(awk -F/ '$2 == "src" || $2 == "test" || $2 == "resources" { print $1 }' <<<"$files" | sort -u)
           mutable=$(./mill resolve __.strykerMutate 2>/dev/null | sed -n 's/\.strykerMutate$//p' | sort -u)
           modules=$(comm -12 <(printf '%s\n' "$changed") <(printf '%s\n' "$mutable") | xargs)
-          echo "Changed top-level dirs: $(xargs <<<"$changed")"
+          scopes=
+          for m in $modules; do
+            srcs=$(grep "^$m/src/.*\.scala$" <<<"$files" | paste -sd, || true)
+            echo "Scope of $m: ${srcs:-whole module}"
+            scopes="$scopes${scopes:+ }$m=$srcs"
+          done
+          echo "Changed modules: $(xargs <<<"$changed")"
           echo "Mutation-tested modules: $(xargs <<<"$mutable")"
           echo "Selected: ${modules:-<none>}"
           echo "modules=$modules" >> "$GITHUB_OUTPUT"
-          echo "files=$(paste -sd, <<<"$files")" >> "$GITHUB_OUTPUT"
+          echo "scopes=$scopes" >> "$GITHUB_OUTPUT"
 
-      # strykerMutate is an exclusive command, so modules run one after another. STRYKER_INCLUDED_FILES carries the
-      # PR's changed .scala files for the file-level delta (the strykerIncludedFiles override in build.mill reads it;
-      # each module only picks up the entries under its own source roots). Left empty, a module is mutated whole.
+      # strykerMutate is an exclusive command, so modules run one after another, each with its own scope as
+      # STRYKER_INCLUDED_FILES (the strykerIncludedFiles override in build.mill reads it on every invocation): the
+      # module's changed .scala files under <module>/src, or empty for a module whose changes are test- or
+      # resource-only, which mutates it whole.
       - name: Mutation testing
         if: steps.changed.outputs.modules != ''
         continue-on-error: false
         env:
-          MODULES: ${{ steps.changed.outputs.modules }}
-          STRYKER_INCLUDED_FILES: ${{ steps.changed.outputs.files }}
+          SCOPES: ${{ steps.changed.outputs.scopes }}
         run: |
-          for m in $MODULES; do
-            ./mill "$m.strykerMutate"
+          for scope in $SCOPES; do
+            STRYKER_INCLUDED_FILES="${scope#*=}" ./mill "${scope%%=*}.strykerMutate"
           done
 
       - name: Upload mutation reports
@@ -175,8 +185,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MODULES: ${{ steps.changed.outputs.modules }}
+          SCOPES: ${{ steps.changed.outputs.scopes }}
           ARTIFACT_URL: ${{ steps.mutation_html.outputs.artifact-url }}
         run: |
-          # shellcheck disable=SC2086 # MODULES is a space-separated list
-          python3 .github/scripts/quality-report.py mutation $MODULES --artifact-url "$ARTIFACT_URL" \
+          # shellcheck disable=SC2086 # MODULES and SCOPES are space-separated lists
+          python3 .github/scripts/quality-report.py mutation $MODULES --scope $SCOPES --artifact-url "$ARTIFACT_URL" \
             | python3 .github/scripts/quality-report.py post --section mutation --pr ${{ github.event.pull_request.number }}

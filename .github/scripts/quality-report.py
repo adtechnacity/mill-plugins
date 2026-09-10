@@ -4,7 +4,7 @@
 Python 3 standard library only (runs on ubuntu-latest without pip).
 
     quality-report.py coverage [--artifact-url URL]
-    quality-report.py mutation [MODULE ...] [--artifact-url URL]
+    quality-report.py mutation [MODULE ...] [--scope MODULE=FILE,... ...] [--artifact-url URL]
     quality-report.py cpd [--report-dir DIR] [--languages LANG ...] [--warn N] [--error N]
     quality-report.py post --section NAME --pr NUMBER     (section markdown on stdin)
     quality-report.py selftest
@@ -213,26 +213,50 @@ def newest_report(module):
     return reports[-1] if reports else None
 
 
-def mutation_markdown(module_counts, artifact_url=None):
-    """`module_counts` maps each module to its status Counter, or to None when it has no report."""
+def parse_scopes(entries):
+    """`MODULE=FILE,...` entries (the workflow's per-module STRYKER_INCLUDED_FILES) as {module: [files]}.
+
+    `MODULE=` or a bare `MODULE` maps to an empty list: the module was mutated whole. Entries are split and trimmed the
+    way build.mill's strykerIncludedFiles override reads the variable.
+    """
+    scopes = {}
+    for entry in entries:
+        module, _, files = entry.partition("=")
+        scopes[module] = [f.strip() for f in files.split(",") if f.strip()]
+    return scopes
+
+
+def mutation_markdown(module_counts, artifact_url=None, scopes=None):
+    """`module_counts` maps each module to its status Counter, or to None when it has no report.
+
+    `scopes` maps a module to the changed production sources its run was restricted to; a module without an entry, or
+    with an empty list, was mutated whole (what strykerIncludedFiles does when STRYKER_INCLUDED_FILES is empty).
+    """
+    scopes = scopes or {}
     if not module_counts:
         return (
             "### Mutation testing\n\n"
-            "No mutation-tested module changed in this PR: none of its changed `.scala` files lies in a module with a"
-            " `strykerMutate` task, so nothing was mutated."
+            "No mutation-tested module changed in this PR: none of its changed files lies under the `src`, `test` or"
+            " `resources` tree of a module with a `strykerMutate` task, so nothing was mutated."
         )
     rows = []
     errors = []
     unreported = []
+    scoped = []
     for module, counts in module_counts.items():
+        files = scopes.get(module) or []
+        scope = plural(len(files), "file") if files else "whole module"
+        if files:
+            scoped.append(f"`{module}`: " + ", ".join(f"`{f}`" for f in files))
         if counts is None:
-            rows.append((module, "no report", "–", "–", "–", "–", "–"))
+            rows.append((module, scope, "no report", "–", "–", "–", "–", "–"))
             unreported.append(f"`{module}`")
             continue
         killed = str(counts["Killed"]) + (f" (+{counts['Timeout']} timeout)" if counts["Timeout"] else "")
         rows.append(
             (
                 module,
+                scope,
                 fmt_rate(mutation_score(counts)),
                 killed,
                 counts["Survived"],
@@ -243,22 +267,26 @@ def mutation_markdown(module_counts, artifact_url=None):
         )
         if counts["CompileError"] or counts["RuntimeError"]:
             errors.append(f"{module}: {counts['CompileError']} compile error(s), {counts['RuntimeError']} runtime error(s)")
-    header = ("Module", "Score", "Killed", "Survived", "No coverage", "Ignored", "Report")
+    header = ("Module", "Scope", "Score", "Killed", "Survived", "No coverage", "Ignored", "Report")
     lines = [
         "### Mutation testing",
         "",
-        "Mutation score of every module with `.scala` changes in this PR:"
+        "Mutation score of every module whose sources, tests or resources changed in this PR:"
         " (killed + timeout) / (killed + timeout + survived + no coverage)."
-        " Ignored mutants are excluded by configuration and do not count.",
+        " Ignored mutants are excluded by configuration and do not count."
+        " A module is mutated only in its changed `.scala` files under `<module>/src`; one whose changes lie elsewhere"
+        " (tests, resources) is mutated whole.",
         "",
-        table(header, rows, ["---", "---:", "---:", "---:", "---:", "---:", "---"]),
+        table(header, rows, ["---", "---", "---:", "---:", "---:", "---:", "---:", "---"]),
     ]
+    if scoped:
+        lines += ["", "Mutated files: " + "; ".join(scoped) + "."]
     if errors:
         lines += ["", "Mutants that did not compile or run (not counted): " + "; ".join(errors) + "."]
     if unreported:
         lines += [
             "",
-            f"No report for {', '.join(unreported)}: the module had no `.scala` changes in this PR, or its stryker4s run"
+            f"No report for {', '.join(unreported)}: the module had no changes in this PR, or its stryker4s run"
             " was skipped or failed before writing `report.json` (see the mutation job log).",
         ]
     return "\n".join(lines)
@@ -271,7 +299,7 @@ def cmd_mutation(args):
         module_counts[module] = (
             mutation_counts(json.loads(report.read_text(encoding="utf-8"))) if report else None
         )
-    emit(mutation_markdown(module_counts, args.artifact_url))
+    emit(mutation_markdown(module_counts, args.artifact_url, parse_scopes(args.scope)))
     return 0
 
 
@@ -617,13 +645,23 @@ def cmd_selftest(_args):
     check(mutation_score(counts) == 70.0, f"mutation score {mutation_score(counts)}")
     check(mutation_score(Counter()) is None, "score without mutants")
     md = mutation_markdown({"devx": counts, "cpd": None}, "https://example.test/artifact")
-    check("| devx | 70.0% | 6 (+1 timeout) | 2 | 1 | 1 | [mutation-html](https://example.test/artifact) |" in md, "row")
+    check("| devx | whole module | 70.0% | 6 (+1 timeout) | 2 | 1 | 1 | [mutation-html](https://example.test/artifact) |" in md, "row")
     check("devx: 1 compile error(s), 1 runtime error(s)" in md, "error footnote")
-    check("| cpd | no report |" in md, "missing report row")
-    check("No report for `cpd`: the module had no `.scala` changes in this PR, or" in md, "missing report explained")
-    check("| m | 75.0% | 3 | 1 | 0 | 0 |" in mutation_markdown({"m": Counter(Killed=3, Survived=1)}), "plain killed count")
+    check("| cpd | whole module | no report |" in md, "missing report row")
+    check("No report for `cpd`: the module had no changes in this PR, or" in md, "missing report explained")
+    check("Mutated files:" not in md, "no file list when every module was mutated whole")
+    md = mutation_markdown({"m": Counter(Killed=3, Survived=1)})
+    check("| m | whole module | 75.0% | 3 | 1 | 0 | 0 |" in md, "plain killed count")
+
+    scopes = parse_scopes(["devx=devx/src/atn/mill/A.scala, devx/src/atn/mill/B.scala,", "cpd=", "docs"])
+    check(scopes == {"devx": ["devx/src/atn/mill/A.scala", "devx/src/atn/mill/B.scala"], "cpd": [], "docs": []}, f"scopes {scopes}")
+    md = mutation_markdown({"devx": counts, "cpd": None, "m": Counter(Killed=1)}, scopes=scopes)
+    check("| devx | 2 files | 70.0% | 6 (+1 timeout) |" in md, "file-scoped row")
+    check("| cpd | whole module | no report |" in md, "whole-module row for a test-only change")
+    check("| m | whole module | 100.0% |" in md, "module absent from --scope defaults to whole module")
+    check("Mutated files: `devx`: `devx/src/atn/mill/A.scala`, `devx/src/atn/mill/B.scala`." in md, "file list")
     md = mutation_markdown({})
-    check("No mutation-tested module changed in this PR: none of its changed `.scala` files" in md, "empty module list")
+    check("No mutation-tested module changed in this PR: none of its changed files lies under" in md, "empty module list")
     check("|" not in md and "No report for" not in md, "empty module list renders neither a table nor a missing-report note")
 
     rows = parse_cpd(CPD_FIXTURE)
@@ -725,6 +763,14 @@ def main(argv=None):
 
     p = sub.add_parser("mutation", help="mutation score per module from the newest stryker4s report.json")
     p.add_argument("modules", nargs="*", help="modules whose newest strykerMutate report to summarise")
+    p.add_argument(
+        "--scope",
+        nargs="*",
+        default=[],
+        metavar="MODULE=FILE,...",
+        help="the changed production sources a module's run was restricted to (its STRYKER_INCLUDED_FILES);"
+        " a module without an entry, or with an empty list, was mutated whole",
+    )
     p.add_argument("--artifact-url", help="URL of the uploaded mutation-html artifact")
     p.set_defaults(func=cmd_mutation)
 
