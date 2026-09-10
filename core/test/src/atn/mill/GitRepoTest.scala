@@ -65,15 +65,10 @@ object GitRepoTest extends TestSuite:
       assert(error(GitRepo.shaOf(opened(repository(0)))).contains("HEAD cannot be resolved"))
     }
 
-    test("tagOf - a lightweight tag on HEAD is reported by name") {
-      val git = repository(1)
-      lightweightTag(git, "v1.2.3")
-      assert(value(GitRepo.tagOf(opened(git))) == "v1.2.3")
-    }
-
-    test("tagOf - commits past the tag are described relative to it") {
+    test("tagOf - a lightweight tag on HEAD by name, commits past it by distance and abbreviated id") {
       val git  = repository(1)
       lightweightTag(git, "v1.2.3")
+      assert(value(GitRepo.tagOf(opened(git))) == "v1.2.3")
       val next = commit(git, "after the tag")
       assert(value(GitRepo.tagOf(opened(git))) == s"v1.2.3-1-g${next.abbreviate(7).name}")
     }

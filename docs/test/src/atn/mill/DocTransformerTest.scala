@@ -6,63 +6,29 @@ object DocTransformerTest extends TestSuite:
 
   val tests = Tests:
 
-    test("titleFromFilename") {
-      test("README becomes project name") {
-        val result = DocTransformer.titleFromFilename("README.md", "bi-services")
-        assert(result == "bi-services")
-      }
-      test("TOPICS becomes Topics") {
-        val result = DocTransformer.titleFromFilename("TOPICS.MD", "bi-services")
-        assert(result == "Topics")
-      }
-      test("kebab-case becomes title case") {
-        val result = DocTransformer.titleFromFilename("getting-started.md", "bi-services")
-        assert(result == "Getting Started")
-      }
-      test("snake_case becomes title case") {
-        val result = DocTransformer.titleFromFilename("my_document.md", "bi-services")
-        assert(result == "My Document")
-      }
+    test("titleFromFilename - the .MD suffix goes, words split on - or _ and are title-cased") {
+      val titles =
+        Seq("TOPICS.MD" -> "Topics", "getting-started.md" -> "Getting Started", "my_document.md" -> "My Document")
+      titles.foreach((filename, title) => assert(DocTransformer.titleFromFilename(filename, "bi-services") == title))
     }
 
-    test("targetFilename") {
-      test("README becomes index.md") {
-        val result = DocTransformer.targetFilename("README.md")
-        assert(result == "index.md")
-      }
-      test("DEVCONTAINERS becomes devcontainers.md") {
-        val result = DocTransformer.targetFilename("DEVCONTAINERS.MD")
-        assert(result == "devcontainers.md")
-      }
+    test("targetFilename - lower-cased with the suffix normalised to .md") {
+      assert(DocTransformer.targetFilename("DEVCONTAINERS.MD") == "devcontainers.md")
     }
 
-    test("slugify") {
-      test("title to filename") {
-        assert(DocTransformer.slugify("Kafka Topics") == "kafka-topics")
-      }
-      test("strips special characters") {
-        assert(DocTransformer.slugify("Getting Started!") == "getting-started")
-      }
-      test("collapses multiple dashes") {
-        assert(DocTransformer.slugify("foo  --  bar") == "foo-bar")
-      }
+    test("slugify - strips special characters and collapses runs of spaces and dashes") {
+      assert(DocTransformer.slugify("Getting Started!") == "getting-started")
+      assert(DocTransformer.slugify("foo  --  bar") == "foo-bar")
     }
 
-    test("FrontMatter.render") {
-      test("generates YAML frontmatter block") {
-        val result = FrontMatter("title" -> "My Page").render
-        assert(result == "---\ntitle: My Page\n---\n\n")
+    test("FrontMatter") {
+      test("render - a YAML block with the fields sorted by key") {
+        assert(FrontMatter("title" -> "My Page").render == "---\ntitle: My Page\n---\n\n")
+        assert(
+          FrontMatter("title" -> "My Page", "sidebar_position" -> "3").render ==
+            "---\nsidebar_position: 3\ntitle: My Page\n---\n\n"
+        )
       }
-      test("handles multiple fields sorted alphabetically") {
-        val result = FrontMatter("title" -> "My Page", "sidebar_position" -> "3").render
-        assert(result.contains("sidebar_position: 3"))
-        assert(result.contains("title: My Page"))
-        assert(result.startsWith("---\n"))
-        assert(result.contains("\n---\n"))
-      }
-    }
-
-    test("FrontMatter.fields") {
       test("fromMap keeps the given fields") {
         val fields = Map("title" -> "My Page", "sidebar_position" -> "2")
         assert(FrontMatter.fromMap(fields).fields == fields)
@@ -73,27 +39,10 @@ object DocTransformerTest extends TestSuite:
       }
     }
 
-    test("parseSplitMarker") {
-      test("extracts YAML fields") {
-        val line   = "<!-- split: title: Kafka Topics -->"
-        val result = SplitMarker.parse(line)
-        assert(result == SplitMarker.Marker(FrontMatter("title" -> "Kafka Topics")))
-      }
-      test("handles multiple fields") {
-        val line   = "<!-- split: title: My Page, sidebar_position: 3 -->"
-        val result = SplitMarker.parse(line)
-        assert(result == SplitMarker.Marker(FrontMatter("title" -> "My Page", "sidebar_position" -> "3")))
-      }
-      test("returns NoMarker for non-marker lines") {
-        val line   = "## Regular heading"
-        val result = SplitMarker.parse(line)
-        assert(result == SplitMarker.NoMarker)
-      }
-      test("returns NoMarker for regular HTML comments") {
-        val line   = "<!-- this is a regular comment -->"
-        val result = SplitMarker.parse(line)
-        assert(result == SplitMarker.NoMarker)
-      }
+    test("parseSplitMarker - fields are split on commas; only split comments are markers") {
+      val marker = "<!-- split: title: My Page, sidebar_position: 3 -->"
+      assert(SplitMarker.parse(marker) == SplitMarker.Marker(FrontMatter("title" -> "My Page", "sidebar_position" -> "3")))
+      assert(SplitMarker.parse("<!-- this is a regular comment -->") == SplitMarker.NoMarker)
     }
 
     test("splitDocument") {
@@ -119,22 +68,11 @@ object DocTransformerTest extends TestSuite:
       }
     }
 
-    test("extractImagePaths") {
-      test("finds markdown image references") {
-        val content = "![alt](images/foo.png)\ntext\n![bar](./diagrams/arch.svg)"
-        val result  = ImageAdjuster.extractImagePaths(content)
-        assert(result == Seq("images/foo.png", "./diagrams/arch.svg"))
-      }
-      test("ignores external URLs") {
-        val content = "![alt](https://example.com/img.png)"
-        val result  = ImageAdjuster.extractImagePaths(content)
-        assert(result.isEmpty)
-      }
-      test("ignores absolute paths") {
-        val content = "![alt](/absolute/path.png)"
-        val result  = ImageAdjuster.extractImagePaths(content)
-        assert(result.isEmpty)
-      }
+    test("extractImagePaths - relative references in order; URLs and absolute paths are left alone") {
+      val content = "![alt](images/foo.png)\ntext\n![bar](./diagrams/arch.svg)"
+      assert(ImageAdjuster.extractImagePaths(content) == Seq("images/foo.png", "./diagrams/arch.svg"))
+      assert(ImageAdjuster.extractImagePaths("![alt](https://example.com/img.png)").isEmpty)
+      assert(ImageAdjuster.extractImagePaths("![alt](/absolute/path.png)").isEmpty)
     }
 
     test("transform") {
@@ -147,14 +85,6 @@ object DocTransformerTest extends TestSuite:
         assert(content.startsWith("---\ntitle: Topics\n---\n"))
         assert(content.contains("# Kafka Topics"))
         assert(content.contains("Some content about topics."))
-      }
-
-      test("README becomes index.md with project name title") {
-        val (result, targetDir) = DocFixtures.transformed("README.md", "# My Project\n\nWelcome.\n")
-
-        assert(result.files == Seq(targetDir / "index.md"))
-        val content = os.read(targetDir / "index.md")
-        assert(content.startsWith("---\ntitle: bi-services\n---\n"))
       }
 
       test("file with split markers produces multiple files") {

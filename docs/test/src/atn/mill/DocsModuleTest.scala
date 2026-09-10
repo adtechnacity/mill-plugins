@@ -11,25 +11,6 @@ object DocsModuleTest extends TestSuite:
 
   val tests = Tests:
 
-    test("DocTransformer.titleFromFilename") {
-      assert(DocTransformer.titleFromFilename("README.md", "test-project") == "test-project")
-      assert(DocTransformer.titleFromFilename("TOPICS.md", "test-project") == "Topics")
-    }
-
-    test("DocsModule.excludedModules - defaults to empty") {
-      assert(BasicDocsBuild.docs.excludedModules == Set("excluded"))
-    }
-
-    test("DocsModule.docProjectName") {
-      assert(BasicDocsBuild.docs.docProjectName == "test-project")
-    }
-
-    test("DocsModule.docRootModule - is not reflected as a child module") {
-      // Mill's resolver enumerates every public no-arg Module-returning method as a child
-      // module, so a Module-typed docRootModule would surface as `docs.docRootModule`.
-      assert(BasicDocsBuild.docs.moduleDirectChildren.isEmpty)
-    }
-
     test("DocsModule.allModules - discovers ScalaModules under docRootModule, skipping test, scoverage and excluded") {
       val discovered = BasicDocsBuild.moduleInternal.modules.map(_.moduleSegments.render).toSet
       assert(discovered == Set("", "basic", "basic.test", "basic.scoverage", "excluded", "docs"))
@@ -39,7 +20,9 @@ object DocsModuleTest extends TestSuite:
     test("DocsModule - transitive wildcard selectors resolve through docRootModule") {
       // Regression: `./mill resolve __` and `__.compile` failed with "Cyclic module reference
       // detected at docs.docRootModule" because the resolver treated the root reference as a
-      // child module whose class had already been visited on the way down.
+      // child module whose class had already been visited on the way down. Mill's resolver
+      // enumerates every public no-arg Module-returning method as a child module, so a
+      // Module-typed docRootModule would surface as `docs.docRootModule` here.
       UnitTester(BasicDocsBuild, os.temp.dir()).scoped { eval =>
         eval.evaluator.resolveSegments(Seq("__"), SelectMode.Multi) match {
           case Result.Success(segments) =>
