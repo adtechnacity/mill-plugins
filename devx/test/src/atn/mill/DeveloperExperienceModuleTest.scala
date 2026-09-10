@@ -36,12 +36,12 @@ object DeveloperExperienceModuleTest extends TestSuite:
 
   /** Runs `body` in a fresh build whose clients talk to a fake server answering `routes`. */
   private def scoped[A](routes: PartialFunction[Received, Reply])(body: Scope => A): A =
-    withClients(routes) { api =>
-      val build  = new DevxBuild
+    withClients(routes) { c =>
+      val build  = new DevxBuild(c.codeScene, c.portIO)
       val out    = new ByteArrayOutputStream
       val stream = new PrintStream(out, true, UTF_8)
       UnitTester(build, os.temp.dir(), outStream = stream, errStream = stream).scoped { eval =>
-        body(Scope(build, eval, api, out))
+        body(Scope(build, eval, c.server, out))
       }
     }
 
@@ -138,9 +138,9 @@ object DeveloperExperienceModuleTest extends TestSuite:
       }
 
     test("exportProjectList - writes projects.json and lists nothing when the payload has no projects"):
-      withClients(noProjects) { _ =>
+      scoped(noProjects) { s =>
         val dest = os.temp.dir()
-        assert(exportProjectList(dest) == Nil, ujson.read(os.read(dest / "projects.json")) == ujson.Obj())
+        assert(s.build.devx.exportProjectList(dest) == Nil, ujson.read(os.read(dest / "projects.json")) == ujson.Obj())
       }
 
     test("importProject"):
@@ -202,15 +202,24 @@ object DeveloperExperienceModuleTest extends TestSuite:
         (fields == expected).label(fields.mkString(" / "))
       })
 
-    test("external module - runs upsertTeams by default"):
-      assert(DeveloperExperience.defaultTask() == "upsertTeams")
+    test("external module"):
+
+      test("runs upsertTeams by default"):
+        assert(DeveloperExperience.defaultTask() == "upsertTeams")
+
+      test("talks to the public CodeScene and Port.io deployments by default"):
+        assert(DeveloperExperience.codeScene == CodeScene, DeveloperExperience.portIO == PortIO)
 
 // The modules are nested in a class rather than an object: Scala 3 compiles objects nested in an object to static
 // fields that Mill's reflective child discovery does not see, whereas a real build.mill is wrapped in a class by
-// Mill's codegen and reflects fine. Each test instantiates its own build, so every UnitTester gets a fresh module dir.
-abstract class DevxRoot extends TestRootModule:
+// Mill's codegen and reflects fine. Each test instantiates its own build, so every UnitTester gets a fresh module dir
+// and the module talks to that test's fake clients.
+abstract class DevxRoot(codeSceneClient: CodeSceneClient, portIOClient: PortIOClient) extends TestRootModule:
   object devx extends DeveloperExperience:
-    def defaultTask(): String = "upsertTeams"
+    def defaultTask(): String               = "upsertTeams"
+    override def codeScene: CodeSceneClient = codeSceneClient
+    override def portIO: PortIOClient       = portIOClient
 
-class DevxBuild extends DevxRoot:
+class DevxBuild(codeSceneClient: CodeSceneClient, portIOClient: PortIOClient)
+    extends DevxRoot(codeSceneClient, portIOClient):
   lazy val millDiscover: Discover = Discover[this.type]
