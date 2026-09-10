@@ -17,10 +17,6 @@ object MillProcessTestRunnerTest extends TestSuite:
 
   private val sep    = java.io.File.pathSeparator
   private val logDir = os.root / "out" / "m" / "strykerMutate.dest" / "testrunner-logs"
-  private val socket = os.root / "s.sock"
-
-  /** A server with nothing configured beyond where it runs and logs. */
-  private def bareServer(workingDir: os.Path) = ServerConfig(Seq.empty, Seq.empty, Map.empty, workingDir, logDir)
 
   private val suite = "atn.mill.StrykerFixtureSuite"
 
@@ -33,9 +29,6 @@ object MillProcessTestRunnerTest extends TestSuite:
     withFakeServer(script) { socketPath =>
       run(MillTestRunnerConnection.create(socketPath).use(conn => body(new MillProcessTestRunner(conn))))
     }
-
-  /** A server that answers every request the same way. */
-  private def always(response: Response): (Int, Request) => Option[Response] = (_, _) => Some(response)
 
   /** What the server reports for an initial run: `covered` maps mutant ids to the ids of the `files` covering them. */
   private def coverage(
@@ -52,86 +45,77 @@ object MillProcessTestRunnerTest extends TestSuite:
 
   val tests = Tests:
 
-    test("processSpec - forwards the environment and java options to the forked server") {
+    test("processSpec - classpath, java options, socket and main class in order; env forwarded; log outside the tmp dir") {
+      val tmpDir = os.root / "out" / "m" / "strykerMutate.dest" / "target" / "stryker4s-1"
+      val socket = os.root / "tmp" / "s4s.sock"
       val server = ServerConfig(
         classpath = Seq(os.root / "cp" / "a.jar", os.root / "cp" / "b.jar"),
         javaOpts = Seq("-Xmx1G", "-Dfoo=bar"),
         env = Map("MILL_TEST_RESOURCE_DIR" -> "/ws/res", "PLUGIN_VERSION" -> "1.0.0"),
-        workingDir = os.root / "work",
+        workingDir = tmpDir,
         logDir = logDir
       )
-      val spec   = processSpec(server, socketPath = os.root / "tmp" / "s4s.sock")
+      val spec   = processSpec(server, socket)
+      // Java options sit between the classpath and the socket property; the main class comes last.
+      assert(
+        spec.args == Seq(
+          "-cp",
+          s"${os.root / "cp" / "a.jar"}$sep${os.root / "cp" / "b.jar"}",
+          "-Xmx1G",
+          "-Dfoo=bar",
+          s"-D${TestProcessProperties.unixSocketPath}=$socket",
+          "stryker4s.sbt.testrunner.SbtTestRunnerMain"
+        )
+      )
       // The test module's forkEnv reaches the server process untouched (MILL_TEST_RESOURCE_DIR-style variables).
       assert(spec.env == Map("MILL_TEST_RESOURCE_DIR" -> "/ws/res", "PLUGIN_VERSION" -> "1.0.0"))
-      // Java options sit between the classpath and the socket property; the main class comes last.
-      assert(spec.args.containsSlice(Seq("-Xmx1G", "-Dfoo=bar")))
-      assert(spec.args.last == "stryker4s.sbt.testrunner.SbtTestRunnerMain")
-      assert(spec.args.contains(s"-D${TestProcessProperties.unixSocketPath}=${os.root / "tmp" / "s4s.sock"}"))
-      val cp     = spec.args(spec.args.indexOf("-cp") + 1)
-      assert(cp == Seq(os.root / "cp" / "a.jar", os.root / "cp" / "b.jar").mkString(sep))
-      assert(spec.workingDir == os.root / "work")
-    }
-
-    test("processSpec - an empty environment adds nothing") {
-      val spec = processSpec(bareServer(os.root), socket)
-      assert(spec.env.isEmpty)
-      assert(spec.args.head == "-cp")
-    }
-
-    test("processSpec - the server log lives in logDir, never in the stryker tmp dir the server works in") {
-      val tmpDir = os.root / "out" / "m" / "strykerMutate.dest" / "target" / "stryker4s-1"
-      val spec   = processSpec(bareServer(tmpDir), socket)
-      // stryker4s deletes the tmp dir while the server may still hold its log open; on NFS that leaves a
-      // `.nfsXXXX` entry behind and the delete fails with DirectoryNotEmptyException.
+      assert(spec.workingDir == tmpDir)
+      // The server log lives in logDir, never in the stryker tmp dir the server works in: stryker4s deletes the tmp
+      // dir while the server may still hold its log open; on NFS that leaves a `.nfsXXXX` entry behind and the delete
+      // fails with DirectoryNotEmptyException.
       assert(spec.logFile.startsWith(logDir))
       assert(!spec.logFile.startsWith(tmpDir))
       assert(spec.logFile.last.startsWith("testrunner-"))
       assert(spec.logFile.ext == "log")
-      assert(spec.workingDir == tmpDir)
     }
 
-    test("runMutant - sends the mutant id with the covering suites; all tests passing means it survived") {
-      val expected = StartTestRun(MutantId(7), Seq(suite))
-      val result   = withRunner { (_, request) =>
-        Some(if request == expected then TestsSuccessful(2) else ErrorDuringTestRun(s"unexpected $request"))
-      }(_.runMutant(mutant(7), covering))
-      assert(result.id == "7")
-      assert(result.status == MutantStatus.Survived)
-      assert(result.testsCompleted == Some(2))
-      assert(result.coveredBy == Some(Seq("0", "1")))
-      assert(result.killedBy.isEmpty)
-      assert(result.statusReason.isEmpty)
-    }
-
-    test("runMutant - failed tests kill the mutant, mapped back to their definition ids and messages") {
+    test("runMutant - sends the mutant id with the covering suites and maps the server's answer to a result") {
       val failed = Seq(
         FailedTestDefinition(suite, "second", Some("assertion failed")),
         FailedTestDefinition(suite, "first", None),
         FailedTestDefinition("other.Suite", "first", Some("elsewhere"))
       )
-      val result = withRunner(always(TestsUnsuccessful(2, failed)))(_.runMutant(mutant(3), covering))
-      assert(result.status == MutantStatus.Killed)
-      assert(result.testsCompleted == Some(2))
-      // killedBy holds the ids of the failed tests of suites that ran; the reason keeps every message reported.
-      assert(result.killedBy == Some(Seq("1", "0")))
-      assert(result.statusReason == Some("second: assertion failed\n\nfirst: elsewhere"))
-      assert(result.coveredBy == Some(Seq("0", "1")))
-    }
 
-    test("runMutant - an error while running the tests kills the mutant with the error as reason") {
-      val result = withRunner(always(ErrorDuringTestRun("boom")))(_.runMutant(mutant(1), covering))
-      assert(result.status == MutantStatus.Killed)
-      assert(result.statusReason == Some("boom"))
-      assert(result.killedBy.isEmpty)
-      assert(result.testsCompleted.isEmpty)
-      assert(result.coveredBy == Some(Seq("0", "1")))
-    }
-
-    test("runMutant - any other answer is a runtime error") {
-      val result = withRunner(always(SetupTestContextSuccessful()))(_.runMutant(mutant(1), covering))
-      assert(result.status == MutantStatus.RuntimeError)
-      assert(result.coveredBy == Some(Seq("0", "1")))
-      assert(result.statusReason.isEmpty)
+      // (answer, status, testsCompleted, killedBy, statusReason)
+      val cases: Seq[(Response, MutantStatus, Option[Int], Option[Seq[String]], Option[String])] = Seq(
+        // All tests passing means it survived.
+        (TestsSuccessful(2), MutantStatus.Survived, Some(2), None, None),
+        // Failed tests kill it: killedBy holds the ids of the failed tests of suites that ran, mapped back to their
+        // definition ids; the reason keeps every message reported.
+        (
+          TestsUnsuccessful(2, failed),
+          MutantStatus.Killed,
+          Some(2),
+          Some(Seq("1", "0")),
+          Some("second: assertion failed\n\nfirst: elsewhere")
+        ),
+        // An error while running the tests kills it with the error as reason.
+        (ErrorDuringTestRun("boom"), MutantStatus.Killed, None, None, Some("boom")),
+        // Any other answer is a runtime error.
+        (SetupTestContextSuccessful(), MutantStatus.RuntimeError, None, None, None)
+      )
+      cases.foreach { (answer, status, testsCompleted, killedBy, statusReason) =>
+        val expected = StartTestRun(MutantId(7), Seq(suite))
+        val result   = withRunner { (_, request) =>
+          Some(if request == expected then answer else ErrorDuringTestRun(s"unexpected $request"))
+        }(_.runMutant(mutant(7), covering))
+        assert(result.id == "7")
+        assert(result.status == status)
+        assert(result.testsCompleted == testsCompleted)
+        assert(result.killedBy == killedBy)
+        assert(result.statusReason == statusReason)
+        assert(result.coveredBy == Some(Seq("0", "1")))
+      }
     }
 
     test("initialTestRun - runs the suite twice; mutants covered only the first time are static") {
@@ -154,7 +138,7 @@ object MillProcessTestRunnerTest extends TestSuite:
     }
 
     test("initialTestRun - an answer that is not a coverage report is a protocol error") {
-      val error = Try(withRunner(always(TestsSuccessful(1)))(_.initialTestRun())).failed.get
+      val error = Try(withRunner((_, _) => Some(TestsSuccessful(1)))(_.initialTestRun())).failed.get
       assert(error.isInstanceOf[MatchError])
     }
 
