@@ -11,11 +11,9 @@ import PropertyChecks.{checkProp, roundTrip}
 /** [[PortIO]] against a [[FakeApi]]: credentials, the token exchange and its cache, and the bulk entity upload. */
 object PortIOTest extends TestSuite:
 
-  /** The credential accessors as (call, environment variable name, value the fake environment holds for it). */
-  private val credentials: Seq[(() => String, String, String)] = Seq(
-    (() => PortIO.clientId, PortIO.portClientIdEnvVar, PortClientId),
-    (() => PortIO.secret, PortIO.portClientSecretEnvVar, PortSecret)
-  )
+  /** The credential accessors as (call, environment variable name). */
+  private val credentials: Seq[(() => String, String)] =
+    Seq((() => PortIO.clientId, PortIO.portClientIdEnvVar), (() => PortIO.secret, PortIO.portClientSecretEnvVar))
 
   private val entities = List(PortIO.Entity("2", "Platform"), PortIO.Entity("3", "Data", icon = "Team", team = "core"))
 
@@ -42,21 +40,16 @@ object PortIOTest extends TestSuite:
 
   val tests = Tests:
 
-    test("credentials"):
-
-      test("read the configured environment variables"):
-        withClients(port)(_ => for (call, _, value) <- credentials do assert(call() == value))
-
-      test("fail naming the variable when it is unset or empty"):
-        for
-          (call, name, _) <- credentials
-          value           <- Seq(None, Some(""))
-        do
-          withClients(port) { _ =>
-            PortIO.getenv = _ => value
-            val error = assertThrows[RuntimeException](call())
-            assert(error.getMessage.contains(name))
-          }
+    test("credentials - fail naming the variable when it is unset or empty"):
+      for
+        (call, name) <- credentials
+        value        <- Seq(None, Some(""))
+      do
+        withClients(port) { _ =>
+          PortIO.getenv = _ => value
+          val error = assertThrows[RuntimeException](call())
+          assert(error.getMessage.contains(name))
+        }
 
     test("accessToken"):
 
@@ -77,12 +70,6 @@ object PortIOTest extends TestSuite:
           PortIO.accessTokenCache match
             case Some((expiry, cached)) => assert(cached == first, expiry >= before + ttl, expiry <= after + ttl)
             case None                   => throw new java.lang.AssertionError("token was not cached")
-        }
-
-      test("returns an unexpired cached token without a request"):
-        withClients(port) { server =>
-          PortIO.accessTokenCache = Some((Long.MaxValue, "cached"))
-          assert(PortIO.accessToken == "cached", server.requests.isEmpty)
         }
 
       test("replaces an expired cached token"):

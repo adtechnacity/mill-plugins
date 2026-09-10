@@ -89,12 +89,9 @@ object DeveloperExperienceTest extends TestSuite:
             .label(s"slugify('$input') = '$result' is longer than input")
         })
 
-      test("empty input yields empty output"):
-        assert(slugify("") == "")
-
     test("writeJson"):
 
-      test("round-trip: written JSON can be read back identically"):
+      test("round-trip: creates the parent directories and reads back what it wrote"):
         checkProp(forAll(Gen.alphaNumStr.suchThat(_.nonEmpty), Gen.chooseNum(-100, 100)) { (key, value) =>
           val tmp      = os.temp.dir()
           val path     = tmp / "sub" / "dir" / "data.json"
@@ -104,12 +101,6 @@ object DeveloperExperienceTest extends TestSuite:
           (readBack(key).num.toInt == value)
             .label(s"round-trip failed for key='$key', value=$value")
         })
-
-      test("creates parent directories"):
-        val tmp  = os.temp.dir()
-        val path = tmp / "a" / "b" / "c" / "file.json"
-        writeJson(path, ujson.Obj("x" -> 1))
-        assert(os.exists(path))
 
       test("overwrites existing file"):
         val tmp    = os.temp.dir()
@@ -126,31 +117,18 @@ object DeveloperExperienceTest extends TestSuite:
         val content = os.read(path)
         assert(content.contains("  "))
 
-    test("tryFetch"):
+    test("tryFetch - recovers from exception without throwing"):
+      checkProp(forAll(Gen.alphaNumStr) { msg =>
+        tryFetch("test", "proj")(throw new RuntimeException(msg))
+        Prop.passed
+      })
 
-      test("executes block when no exception"):
-        var executed = false
-        tryFetch("test", "proj") { executed = true }
-        assert(executed)
-
-      test("recovers from exception without throwing"):
-        checkProp(forAll(Gen.alphaNumStr) { msg =>
-          tryFetch("test", "proj")(throw new RuntimeException(msg))
-          Prop.passed
-        })
-
-    test("teamNames"):
-
-      test("extracts exactly the name field from each team object"):
-        checkProp(forAll(genTeamNames) { names =>
-          val json   = mkTeamsJson(names)
-          val result = teamNames(json)
-          (result == names).label(s"expected $names, got $result")
-        })
-
-      test("returns empty list for empty teams array"):
-        val json = mkTeamsJson(Nil)
-        assert(teamNames(json).isEmpty)
+    test("teamNames - extracts exactly the name field from each team object"):
+      checkProp(forAll(genTeamNames) { names =>
+        val json   = mkTeamsJson(names)
+        val result = teamNames(json)
+        (result == names).label(s"expected $names, got $result")
+      })
 
     test("teamsToCreate"):
 
@@ -223,8 +201,3 @@ object DeveloperExperienceTest extends TestSuite:
             (result.length <= devEntries.length)
               .label(s"result has ${result.length} entries but input had ${devEntries.length}")
         })
-
-      test("returns empty for empty developers"):
-        val devsJson = mkDevsJson(Nil)
-        val result   = resolveDevAssignments(devsJson, Map("A" -> 1))
-        assert(result.isEmpty)

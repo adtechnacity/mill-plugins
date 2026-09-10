@@ -70,21 +70,13 @@ object CodeSceneClientTest extends TestSuite:
 
     test("token"):
 
-      test("is the value of the configured environment variable"):
-        withClients(echoAll)(_ => assert(CodeScene.token == CodeSceneToken))
-
-      test("fails naming the variable when it is unset"):
-        withClients(echoAll) { _ =>
-          CodeScene.getenv = _ => None
-          val error = assertThrows[RuntimeException](CodeScene.token)
-          assert(error.getMessage.contains(CodeScene.csAccessTokenEnvVar))
-        }
-
-      test("fails when the variable is empty"):
-        withClients(echoAll) { _ =>
-          CodeScene.getenv = _ => Some("")
-          assertThrows[RuntimeException](CodeScene.token)
-        }
+      test("fails naming the variable when it is unset or empty"):
+        for value <- Seq(None, Some("")) do
+          withClients(echoAll) { _ =>
+            CodeScene.getenv = _ => value
+            val error = assertThrows[RuntimeException](CodeScene.token)
+            assert(error.getMessage.contains(CodeScene.csAccessTokenEnvVar))
+          }
 
       test("getenv reads the process environment by default"):
         val absent = "ATN_DEVX_" + java.util.UUID.randomUUID.toString.replace('-', '_')

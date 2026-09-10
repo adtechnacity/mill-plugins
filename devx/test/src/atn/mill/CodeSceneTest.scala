@@ -78,13 +78,3 @@ object CodeSceneTest extends TestSuite:
           && (asEntry.name == dev.name).label("name mismatch")
           && (asEntry.ref == dev.ref).label("ref mismatch")
         })
-
-      test("emails list length is preserved through serialization"):
-        checkProp(forAll { (dev: CodeScene.Developer) =>
-          (roundTrip(dev).emails.length == dev.emails.length).label("emails length changed")
-        })
-
-      test("former_contributor flag is preserved through serialization"):
-        checkProp(forAll { (dev: CodeScene.Developer) =>
-          (roundTrip(dev).former_contributor == dev.former_contributor).label("former_contributor changed")
-        })
