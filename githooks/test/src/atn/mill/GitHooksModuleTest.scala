@@ -57,14 +57,11 @@ object GitHooksModuleTest extends TestSuite:
       assert(GitHooksModule.defaultTask() == "install")
     }
 
-    test("validModules - lowercase modules at any depth, minus the excluded names, plus mill-build") {
-      val build = new HooksBuild()
+    test("validModules - lowercase modules at any depth, minus excludedModuleNames, plus mill-build") {
+      val build  = new HooksBuild()
+      val narrow = new NarrowBuild()
       assert(build.validModules(build) == Set("core", "app", "sub", "mill-build"))
-    }
-
-    test("validModules - excludedModuleNames replaces the default exclusions") {
-      val build = new NarrowBuild()
-      assert(build.validModules(build) == Set("app", "sub", "test", "integration", "mill-build"))
+      assert(narrow.validModules(narrow) == Set("app", "sub", "test", "integration", "mill-build"))
     }
 
     test("head* - delegate to GitRepo for the enclosing checkout") {
@@ -91,14 +88,9 @@ object GitHooksModuleTest extends TestSuite:
       }
     }
 
-    test("validateCommit - accepts a message scoped to one of the build's modules") {
+    test("validateCommit - accepts a scope that is a module of the build and rejects one that is not") {
       withBuild() { (_, eval) =>
         assert(eval("validateCommit", "--file", messageFile("feat(core): add the greeting\n")).isRight)
-      }
-    }
-
-    test("validateCommit - rejects a scope that is not a module of the build") {
-      withBuild() { (_, eval) =>
         val msg = failureOf(eval("validateCommit", "--file", messageFile("feat(nope): add the greeting\n")))
         assert(msg.contains("* nope is not a valid module"))
       }

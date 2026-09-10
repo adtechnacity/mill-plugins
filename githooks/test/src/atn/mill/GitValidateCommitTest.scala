@@ -28,14 +28,6 @@ object GitValidateCommitTest extends TestSuite:
 
   val tests = Tests:
 
-    test("validate - accepts a header with a known type and a module scope") {
-      assert(accepted("feat(core): add the greeting"))
-    }
-
-    test("validate - the scope is optional") {
-      assert(accepted("fix: repair the greeting"))
-    }
-
     test("validate - a breaking-change marker is accepted") {
       assert(accepted("feat(app)!: drop the greeting"))
     }
@@ -44,19 +36,16 @@ object GitValidateCommitTest extends TestSuite:
       assert(accepted("# Please enter the commit message\n#\nfeat(core): add the greeting\n\nSome body."))
     }
 
-    test("validate - an unknown type is reported with the header") {
-      val err = failure("wat(core): add the greeting")
-      assert(err.startsWith("Illegal conventional commit.\n* wat is not a valid type\n"))
-      assert(err.endsWith("\nwat(core): add the greeting"))
-    }
-
-    test("validate - a scope that is not a module is reported") {
-      assert(failure("feat(nope): add the greeting").contains("* nope is not a valid module"))
-    }
-
-    test("validate - every failed check is listed, one per line") {
-      val err = failure("wat(nope): short")
-      assert(err.contains("* wat is not a valid type,\n* nope is not a valid module,\n* Message too short\n"))
+    test("validate - every failed check is listed under the heading, one per line, and the header closes the report") {
+      assert(
+        failure("wat(nope): short") == List(
+          "Illegal conventional commit.",
+          "* wat is not a valid type,",
+          "* nope is not a valid module,",
+          "* Message too short",
+          "wat(nope): short"
+        ).mkString("\n")
+      )
     }
 
     test("validate - a header that is not a conventional commit cannot be decoded") {

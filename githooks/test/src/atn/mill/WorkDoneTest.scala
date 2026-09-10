@@ -7,22 +7,14 @@ import utest.*
 
 object WorkDoneTest extends TestSuite:
 
-  private val hooks: List[WorkDone] =
-    List(WrotePreCommitHook, WrotePrePushHook, WrotePrepareCommitMsgHook, WroteCommitHook)
-
   private val genValue: Gen[Int] = Gen.choose(0, 15)
 
   val tests = Tests:
 
     test("each hook owns one bit, so a sum says exactly which hooks were written") {
+      val hooks = List(WrotePreCommitHook, WrotePrePushHook, WrotePrepareCommitMsgHook, WroteCommitHook)
       assert(NotAThing.value == 0)
       assert(hooks.map(_.value) == List(1, 2, 4, 8))
-    }
-
-    test("and - adds the work of both sides, starting from nothing") {
-      assert(hooks.foldLeft[WorkDone](NotAThing)(_.and(_)).value == 15)
-      assert(NotAThing.and(WrotePrePushHook).value == 2)
-      assert(WrotePrePushHook.and(NotAThing).value == 2)
     }
 
     test("and - property: the value is the sum, whichever side comes first") {

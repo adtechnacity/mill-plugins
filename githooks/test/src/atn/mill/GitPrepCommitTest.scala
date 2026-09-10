@@ -80,14 +80,6 @@ object GitPrepCommitTest extends TestSuite:
       assert(gpc.prep("feat: draft", "commit") == gpc.gen("feat: draft"))
     }
 
-    test("stagedChanges - a unified diff of the staged entries only") {
-      val git  = stagedRepo()
-      val diff = prepCommit(git).stagedChanges(stagedEntries(git))
-      assert(diff.contains("diff --git a/core/src/Hello.scala b/core/src/Hello.scala"))
-      assert(diff.contains("+object Hello"))
-      assert(!diff.contains("edited but not staged"))
-    }
-
     test("gen - nothing staged: no model is consulted and the template wraps the message") {
       serving(200, chatReply(llmReply)) { fake =>
         val out = prepCommit(repoWithCommit(), fake.url).gen("feat: draft\n# trailing comment")
@@ -116,7 +108,7 @@ object GitPrepCommitTest extends TestSuite:
       }
     }
 
-    test("messageTemplate - sends the staged diff, the top-level scopes of the staged paths and the environment's model") {
+    test("messageTemplate - sends only the staged diff, its top-level scopes and the environment's model") {
       serving(200, chatReply(llmReply)) { fake =>
         val git      = stagedRepo()
         val template = prepCommit(git, fake.url).messageTemplate(stagedEntries(git))
@@ -132,6 +124,7 @@ object GitPrepCommitTest extends TestSuite:
           messages(0)._2.startsWith("Here is the git diff of what we will commit: \ndiff --git a/core/src/Hello.scala")
         )
         assert(messages(0)._2.contains("+object Hello"))
+        assert(!messages(0)._2.contains("edited but not staged"))
         assert(messages(1) == ("system", "You should select the scope from this list:\ncore\n---"))
         assert(messages(2)._1 == "system")
         assert(messages(3)._1 == "user")
@@ -139,31 +132,25 @@ object GitPrepCommitTest extends TestSuite:
       }
     }
 
-    test("messageTemplate - a failing server yields no suggestion at all") {
+    test("messageTemplate - a failing or an unreachable server yields no suggestion at all") {
+      val git = stagedRepo()
       serving(500, "model exploded") { fake =>
-        val git = stagedRepo()
         assert(prepCommit(git, fake.url).messageTemplate(stagedEntries(git)) == ("", ""))
         assert(fake.chatRequests.size == 1)
       }
-    }
-
-    test("messageTemplate - an unreachable server yields no suggestion at all") {
-      val git = stagedRepo()
       assert(prepCommit(git).messageTemplate(stagedEntries(git)) == ("", ""))
     }
 
-    test("footer - a footer pattern asks for the ticket, co-authors and reviewers at example.com by default") {
-      val out = prepCommit(repoWithCommit(), footer = footerPattern).gen("feat: draft")
-      assert(out.contains("#  you should specify the jira ticket with a line like: `Refs: PRJ-123`.\n"))
-      assert(out.contains("#  document co-authors via `Co-Authored-By: Them <Them@example.com>` lines.\n"))
-      assert(out.contains("#  document reviewers via `Reviewed-By: Me <me@example.com>` lines."))
-    }
+    test("footer - a pattern asks for the ticket, co-authors and reviewers at the configured domain or example.com") {
+      val example = prepCommit(repoWithCommit(), footer = footerPattern).gen("feat: draft")
+      assert(example.contains("#  you should specify the jira ticket with a line like: `Refs: PRJ-123`.\n"))
+      assert(example.contains("#  document co-authors via `Co-Authored-By: Them <Them@example.com>` lines.\n"))
+      assert(example.contains("#  document reviewers via `Reviewed-By: Me <me@example.com>` lines."))
 
-    test("footer - the configured email domain replaces example.com") {
-      val out = prepCommit(repoWithCommit(), emailDomain = "acme.io", footer = footerPattern).gen("feat: draft")
-      assert(out.contains("`Co-Authored-By: Them <Them@acme.io>`"))
-      assert(out.contains("`Reviewed-By: Me <me@acme.io>`"))
-      assert(!out.contains("example.com"))
+      val acme = prepCommit(repoWithCommit(), emailDomain = "acme.io", footer = footerPattern).gen("feat: draft")
+      assert(acme.contains("`Co-Authored-By: Them <Them@acme.io>`"))
+      assert(acme.contains("`Reviewed-By: Me <me@acme.io>`"))
+      assert(!acme.contains("example.com"))
     }
 
     test("footer - without a footer pattern only co-authors are requested, whatever the domain") {

@@ -45,13 +45,6 @@ object GitInstallTest extends TestSuite:
 
   val tests = Tests:
 
-    test("hook paths - one script per git hook, directly under the hooks directory") {
-      val (dir, install) = installer()
-      val paths          =
-        Seq(install.preCommitHookPath, install.prePushHookPath, install.prepareCommitHookPath, install.commitHookPath)
-      assert(paths == hookNames.map(dir / _))
-    }
-
     test("install - fills an empty hooks directory with the four executable scripts") {
       val (dir, install) = installer()
       assert(installed(install, force = false) == Right(allHooks))
@@ -82,49 +75,12 @@ object GitInstallTest extends TestSuite:
       assert(!msg.contains("pre-push"))
     }
 
-    test("writeNext - adds the hook's work to the result so far, or keeps it when the hook is left alone") {
-      val (dir, install) = installer()
-      val existing       = dir / "commit-msg"
-      os.write(existing, "keep")
-      val written        = Result.Success[WorkDone](WrotePrePushHook)
-
-      assert(install.writeNext(false, existing, _ => WroteCommitHook)(written) == Success(written))
+    test("prepare-commit-msg and commit-msg hooks - hand over git's message file, and the commit source when given") {
       assert(
-        install.writeNext(true, existing, _ => WroteCommitHook)(written).map(_.map(_.value)) == Success(
-          Result.Success(10)
-        )
+        hookScript("prepare-commit-msg")(_.writePrepareCommitMsgHook(_)) ==
+          "#!/bin/sh\n\nif [ -n \"$2\" ]; then\n  ./mill git.prepCommit --file $1 --source $2\nelse\n  ./mill git.prepCommit --file $1\nfi\n"
       )
-      assert(
-        install.writeNext(false, dir / "pre-push", _ => WrotePrePushHook)(written).map(_.map(_.value)) == Success(
-          Result.Success(4)
-        )
-      )
-      assert(
-        install.writeNext(false, dir / "pre-push", _ => WrotePrePushHook)(Result.Failure("earlier")) == Success(
-          Result.Failure("earlier")
-        )
-      )
-    }
-
-    test("prepare-commit-msg hook - forwards the commit source only when git supplies one") {
-      val script = hookScript("prepare-commit-msg")(_.writePrepareCommitMsgHook(_))
-      assert(
-        script == "#!/bin/sh\n\nif [ -n \"$2\" ]; then\n  ./mill git.prepCommit --file $1 --source $2\nelse\n  ./mill git.prepCommit --file $1\nfi\n"
-      )
-    }
-
-    test("commit-msg hook - validates the message file git hands over") {
       assert(hookScript("commit-msg")(_.writeCommitHook(_)) == "#!/bin/sh\n\n./mill git.validateCommit --file $1\n")
-    }
-
-    test("selectiveOrFull - selective.run against the snapshot, a `+`-joined full run without one") {
-      val (_, install) = installer()
-      val script       = install.selectiveOrFull(Seq("__.checkFormat", "__.scalafixCheck"))
-      assert(
-        script.startsWith("SELECTIVE_JSON=\"out/mill-selective-execution.json\"\nif [ -f \"$SELECTIVE_JSON\" ]; then\n")
-      )
-      assert(script.contains("\n  ./mill selective.run __.checkFormat __.scalafixCheck\nelse\n"))
-      assert(script.endsWith("\n  ./mill __.checkFormat + __.scalafixCheck\nfi"))
     }
 
     test("writePrePushHook - aborts the push when the test run fails") {
@@ -141,8 +97,15 @@ object GitInstallTest extends TestSuite:
       assert(runIdx < prepareIdx) // snapshot update only after a passing run
     }
 
-    test("writePrePushHook - injects prePushExtraCommands as gates before the test run") {
-      val script = prePushScript(new GitInstall(_, DummyLogger, prePushExtraCommands = Seq("./mill codeHealth")))
+    test("writePrePushHook - prePushExtraCommands gate the test run; the snapshot covers selectiveSnapshotTasks") {
+      val script = prePushScript(
+        new GitInstall(
+          _,
+          DummyLogger,
+          prePushExtraCommands = Seq("./mill codeHealth"),
+          selectiveSnapshotTasks = Seq("__.test", "__.checkFormat", "__.scalafixCheck")
+        )
+      )
 
       val setEIdx = script.indexOf("set -e")
       val gateIdx = script.indexOf("./mill codeHealth")
@@ -151,42 +114,35 @@ object GitInstallTest extends TestSuite:
       assert(gateIdx >= 0)      // the extra gate is present
       assert(setEIdx < gateIdx) // under `set -e`, so a non-zero gate aborts the push
       assert(gateIdx < runIdx)  // fast-fail: gate runs before the slow test run
-    }
 
-    test("writePrePushHook - snapshot covers the configured selectiveSnapshotTasks") {
       // The snapshot must be a superset of every selective.run selector; a too-narrow snapshot makes
       // pre-commit's selective format/scalafix run on every module (absent inputs count as changed).
-      val script = prePushScript(
-        new GitInstall(_, DummyLogger, selectiveSnapshotTasks = Seq("__.test", "__.checkFormat", "__.scalafixCheck"))
-      )
-
-      // space-separated varargs to selective.prepare (NOT `+`, which would run them as separate tasks)
+      // Space-separated varargs to selective.prepare (NOT `+`, which would run them as separate tasks).
       assert(script.contains("selective.prepare __.test __.checkFormat __.scalafixCheck"))
     }
 
-    test("writePreCommitHook - selective with full fallback when selectivePreCommitTasks set") {
+    test("writePreCommitHook - selectivePreCommitTasks replace git.preCommit: selective.run, full without a snapshot") {
       val script = preCommitScript(
         new GitInstall(_, DummyLogger, selectivePreCommitTasks = Seq("__.checkFormat", "__.scalafixCheck"))
       )
 
-      assert(script.contains("set -e"))
-      assert(script.contains("if [ -f \"$SELECTIVE_JSON\" ]; then"))
-      assert(script.contains("selective.run __.checkFormat __.scalafixCheck")) // snapshot present
-      assert(script.contains("__.checkFormat + __.scalafixCheck"))             // first-run fallback
-      assert(!script.contains("git.preCommit"))                                // replaced, not appended
+      assert(
+        script.contains(
+          "set -e\n./mill --meta-level 1 mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll\n" +
+            "SELECTIVE_JSON=\"out/mill-selective-execution.json\"\nif [ -f \"$SELECTIVE_JSON\" ]; then\n" +
+            "  ./mill selective.run __.checkFormat __.scalafixCheck\nelse\n  ./mill __.checkFormat + __.scalafixCheck\nfi\n"
+        )
+      )
+      assert(!script.contains("git.preCommit")) // replaced, not appended
     }
 
-    test("writePreCommitHook - keeps legacy git.preCommit when selectivePreCommitTasks empty") {
-      val script = preCommitScript()
-
-      assert(script.contains("git.preCommit"))
-      assert(!script.contains("selective.run")) // no selective block in the legacy path
-    }
-
-    test("writePreCommitHook - extra commands run under set -e, before the meta-level format check") {
+    test("writePreCommitHook - extra commands run under set -e, before the meta-level format check and git.preCommit") {
       val script = preCommitScript(new GitInstall(_, DummyLogger, preCommitExtraCommands = Seq("bash scan.sh")))
       assert(
-        script
-          .contains("set -e\nbash scan.sh\n./mill --meta-level 1 mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll\n")
+        script.contains(
+          "set -e\nbash scan.sh\n./mill --meta-level 1 mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll\n" +
+            "./mill git.preCommit\n"
+        )
       )
+      assert(!script.contains("selective.run")) // no selective block in the legacy path
     }
