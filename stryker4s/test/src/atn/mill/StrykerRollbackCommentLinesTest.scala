@@ -4,7 +4,6 @@ import cats.data.NonEmptyList
 import fs2.io.file.Path
 import mutationtesting.MutantStatus
 import stryker4s.config.Config
-import stryker4s.log.{Level, Logger}
 import stryker4s.model.{CompilerErrMsg, MutantId, MutantWithId, PlaceableTree, SourceContext}
 import stryker4s.mutants.TreeTraverserImpl
 import stryker4s.mutants.findmutants.MutantMatcherImpl
@@ -15,6 +14,8 @@ import utest.*
 import scala.meta.parsers.XtensionParseInputLike
 import scala.meta.{dialects, Dialect, Source}
 
+import StrykerTestSupport.given
+
 /**
  * Regression for stryker-mutator/stryker4s#2011 (fixed by #2013, shipped in stryker4s-core 0.21.0): `MutantRunner`
  * wrote the instrumented file with the comment-keeping printer while `RollbackHandler` re-parsed `.syntax`, which drops
@@ -23,11 +24,6 @@ import scala.meta.{dialects, Dialect, Source}
  * the scalac output of exactly the written text, so it depends on the two printers agreeing.
  */
 object StrykerRollbackCommentLinesTest extends TestSuite:
-
-  /** Instrumentation and rollback only log progress; nothing here needs to see it. */
-  private given Logger = new Logger:
-    def log(level: Level, msg: => String): Unit                  = ()
-    def log(level: Level, msg: => String, t: => Throwable): Unit = ()
 
   private given config: Config = Config.default.copy(scalaDialect = dialects.Scala3)
   private given Dialect        = config.scalaDialect

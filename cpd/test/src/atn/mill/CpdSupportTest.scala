@@ -14,6 +14,7 @@ object CpdSupportTest extends TestSuite:
 
   private def exampleWorkspace: os.Path = os.Path(sys.env("MILL_TEST_RESOURCE_DIR")) / "example-cpd"
 
+  // The fixed columns of every cpd-<language>.csv row; the (line, file) pair of each occurrence follows them.
   private val csvHeader = "lines,tokens,occurrences"
 
   private def reportDir(root: TestRootModule): os.Path = root.moduleDir / "out" / "cpd" / "cpdCheckAll.dest"

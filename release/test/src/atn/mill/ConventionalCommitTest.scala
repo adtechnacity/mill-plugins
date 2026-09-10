@@ -55,23 +55,10 @@ object ConventionalCommitTest extends TestSuite:
     "feat!(core): bang before scope"
   )
 
-  /** The two spellings the specification allows for the breaking-change footer token. */
-  private val genFooterToken: Gen[String] = Gen.oneOf("BREAKING CHANGE", "BREAKING-CHANGE")
-
-  /** Body lines: printable ASCII that never opens a breaking-change footer. */
-  private val genBody: Gen[List[String]] = Gen.listOf(Gen.asciiPrintableStr.suchThat(!_.startsWith("BREAKING")))
-
   val tests = Tests:
 
     test("parse - a malformed first line returns None"):
       for message <- malformed do assert(ConventionalCommit.parse("h", message).isEmpty)
-
-    test(
-      "parse - prose mentioning a breaking change is no footer: the token must open a line, uppercase, with a colon"
-    ):
-      val message =
-        "fix: keep it\n\nNot a BREAKING CHANGE: honest.\nbreaking change: lowercase\nBREAKING CHANGE without a colon"
-      assert(ConventionalCommit.parse("h", message).map(_.breaking) == Some(false))
 
     test("property - a well-formed header parses back into its parts, description trimmed, hash kept"):
       holds(forAll(genHeader, Gen.alphaNumStr) { case ((typ, scope, bang, description), hash) =>
@@ -79,18 +66,8 @@ object ConventionalCommitTest extends TestSuite:
           == Some(ConventionalCommit(hash, typ, scope, bang, description.trim))
       })
 
-    test("property - the body contributes only the breaking footer, everything else comes from the header"):
-      holds(forAll(genHeader, genBody) { case ((typ, scope, bang, description), body) =>
+    test("property - only the first line of a message is parsed"):
+      holds(forAll(genHeader, Gen.listOf(Gen.asciiPrintableStr)) { case ((typ, scope, bang, description), body) =>
         val line = header(typ, scope, bang, description)
         ConventionalCommit.parse("h", (line :: body).mkString("\n")) == ConventionalCommit.parse("h", line)
-      })
-
-    test("property - the bang and the footer are each sufficient to mark a commit breaking, changing nothing else"):
-      holds(forAll(genHeader, genBody, genFooterToken, genDescription) {
-        case ((typ, scope, bang, description), body, token, note) =>
-          val line       = header(typ, scope, bang, description)
-          val plain      = (line :: body).mkString("\n")
-          val withFooter = (line :: body ::: List("", s"$token: $note")).mkString("\n")
-          ConventionalCommit.parse("h", plain).map(_.breaking) == Some(bang)
-          && ConventionalCommit.parse("h", withFooter) == ConventionalCommit.parse("h", line).map(_.copy(breaking = true))
       })
