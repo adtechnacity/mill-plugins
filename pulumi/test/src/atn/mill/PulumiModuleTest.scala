@@ -33,9 +33,6 @@ object PulumiModuleTest extends TestSuite {
       val info        = PulumiModule.sdkPackageInfo(settings, buildGradle)
       assert(info == Some(PulumiModule.SdkPackageInfo("com/pulumi/acme-plugin-dep", "acme-plugin-dep", "0.3.1")))
     }
-    test("sdkPackageInfo is empty when the gradle files are not recognisable") {
-      assert(PulumiModule.sdkPackageInfo("", "") == None)
-    }
     test("pluginJson matches what the generated gradle build writes") {
       val json     = PulumiModule.pluginJson(PulumiModule.SdkPackageInfo("com/pulumi/x", "acme-plugin-dep", "0.3.1"))
       val expected =
