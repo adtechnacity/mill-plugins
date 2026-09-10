@@ -229,7 +229,7 @@ object sonar extends MillPluginModule with MillPluginMutation {
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
     mvn"org.sonarsource.scanner.lib:sonar-scanner-java-library:4.1.1.1633",
-    mvn"ch.qos.logback:logback-classic:1.5.38",
+    mvn"ch.qos.logback:logback-classic:1.6.1",
     mvn"org.typelevel::cats-core:2.13.0"
   )
 
@@ -255,7 +255,7 @@ object release extends MillPluginModule with MillPluginMutation {
 
 object pulumi extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-pulumi_mill1"
-  def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.13.2")
+  def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.35.0")
 
   // First released in 0.8.0, so that is the baseline rather than the repo-wide 0.3.0.
   override def mimaPreviousVersions = Seq("0.8.0")
