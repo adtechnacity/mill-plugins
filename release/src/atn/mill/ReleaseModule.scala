@@ -33,6 +33,9 @@ trait ReleaseModule extends DefaultTaskModule:
   /** Conventional commit type to changelog section mapping. */
   def typeMapping: Map[String, String] = ChangelogGenerator.DefaultTypeMapping
 
+  /** The git repository read and committed to: by default the one enclosing the working directory. */
+  def gitRepository: mill.api.daemon.Result[Repository] = GitRepo.repo
+
   /**
    * Automatically release based on unreleased conventional commits.
    *
@@ -107,7 +110,7 @@ trait ReleaseModule extends DefaultTaskModule:
    * Execute the full release cycle for the given bump type. Returns a summary string for logging.
    */
   private def performRelease(bump: String): String =
-    val repo = GitRepo.repo match
+    val repo = gitRepository match
       case mill.api.daemon.Result.Success(r) => r
       case f: mill.api.daemon.Result.Failure =>
         throw new RuntimeException(s"Cannot open git repository: ${f.error}")
@@ -150,7 +153,7 @@ trait ReleaseModule extends DefaultTaskModule:
 
   /** Collect parsed conventional commits since the last version tag. */
   private def unreleasedCommits(): List[ConventionalCommit] =
-    GitRepo.repo
+    gitRepository
       .map { repo =>
         val git     = new Git(repo)
         val head    = repo.resolve("HEAD")
