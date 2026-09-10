@@ -118,6 +118,7 @@ trait ReleaseModule extends DefaultTaskModule:
 
     // 1. Determine release version from last tag
     val lastVersion = latestVersionTag(git)
+      .map(_.stripPrefix(tagPrefix))
       .flatMap(SemVer.parse)
       .getOrElse(SemVer(0, 0, 0))
 
