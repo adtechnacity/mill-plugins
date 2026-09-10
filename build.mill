@@ -158,10 +158,13 @@ object stryker4s extends MillPluginModule with MillPluginMutation {
 
 }
 
-object scalafix extends MillPluginModule {
+object scalafix extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-scalafix_mill1"
   def mvnDeps      = Seq(mvn"com.goyeau::mill-scalafix_mill1:0.6.2", mvn"ch.epfl.scala:scalafix-interfaces:0.14.7")
 
+  def strykerTestModule = test
+
+  object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(scalafix)
   }
@@ -217,7 +220,7 @@ object githooks extends MillPluginModule with MillPluginMutation {
   }
 }
 
-object sonar extends MillPluginModule {
+object sonar extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-sonar_mill1"
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
@@ -226,6 +229,9 @@ object sonar extends MillPluginModule {
     mvn"org.typelevel::cats-core:2.13.0"
   )
 
+  def strykerTestModule = test
+
+  object test    extends MillPluginTests
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(core, sonar)
   }

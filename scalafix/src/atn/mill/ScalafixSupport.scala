@@ -75,8 +75,17 @@ trait ScalafixSupport extends ScalaModule:
 object ScalafixSupport:
 
   /** Path to `.scalafix.conf` at the workspace root, when present. */
-  private def workspaceScalafixConfig: Option[os.Path] =
-    Option.when(os.exists(BuildCtx.workspaceRoot / ".scalafix.conf"))(BuildCtx.workspaceRoot / ".scalafix.conf")
+  private def workspaceScalafixConfig: Option[os.Path] = scalafixConfigIn(BuildCtx.workspaceRoot)
+
+  /** `root/.scalafix.conf` when that file exists. */
+  private[mill] def scalafixConfigIn(root: os.Path): Option[os.Path] =
+    Option.when(os.exists(root / ".scalafix.conf"))(root / ".scalafix.conf")
+
+  /**
+   * The inputs that determine the Scalafix tool classloader, and so the key of [[cachedArguments]]: Scala version,
+   * repositories, rule dependencies and local tool classpath. Value-equal across modules that share a rule set.
+   */
+  private[mill] type ToolClasspathKey = (String, Seq[Repository], Seq[Dep], Seq[os.Path])
 
   /**
    * Caches the Scalafix tool classloader (scalafix-cli + rule classpath) across `runScalafix` invocations within a
@@ -95,8 +104,11 @@ object ScalafixSupport:
    * prevent the metaspace exhaustion this cache exists to avoid. The key is value-equal, so there is one entry per
    * distinct rule set, retained for the (short-lived) Mill JVM.
    */
-  private val toolClasspathCache =
-    new ConcurrentHashMap[(String, Seq[Repository], Seq[Dep], Seq[os.Path]), ScalafixArguments]()
+  private val toolClasspathCache = new ConcurrentHashMap[ToolClasspathKey, ScalafixArguments]()
+
+  /** The arguments cached for `key`; `fetch` builds them on the first request for that key only. */
+  private[mill] def cachedArguments(key: ToolClasspathKey)(fetch: => ScalafixArguments): ScalafixArguments =
+    toolClasspathCache.computeIfAbsent(key, _ => fetch)
 
   private def baseArguments(
     scalaVersion: String,
@@ -104,18 +116,15 @@ object ScalafixSupport:
     scalafixMvnDeps: Seq[Dep],
     scalafixToolClasspath: Seq[os.Path]
   ): ScalafixArguments =
-    toolClasspathCache.computeIfAbsent(
-      (scalaVersion, repositories, scalafixMvnDeps, scalafixToolClasspath),
-      _ => {
-        val repos    = repositories.map(CoursierUtils.toApiRepository).asJava
-        val deps     = scalafixMvnDeps.map(CoursierUtils.toCoordinates).asJava
-        val toolUrls = scalafixToolClasspath.map(_.toNIO.toUri.toURL).asJava
-        Scalafix
-          .fetchAndClassloadInstance(scalaVersion, repos)
-          .newArguments()
-          .withToolClasspath(toolUrls, deps, repos)
-      }
-    )
+    cachedArguments((scalaVersion, repositories, scalafixMvnDeps, scalafixToolClasspath)) {
+      val repos    = repositories.map(CoursierUtils.toApiRepository).asJava
+      val deps     = scalafixMvnDeps.map(CoursierUtils.toCoordinates).asJava
+      val toolUrls = scalafixToolClasspath.map(_.toNIO.toUri.toURL).asJava
+      Scalafix
+        .fetchAndClassloadInstance(scalaVersion, repos)
+        .newArguments()
+        .withToolClasspath(toolUrls, deps, repos)
+    }
 
   /**
    * Internal Scalafix driver. Calls `scalafix-interfaces` directly so that locally-compiled rule JARs (via
@@ -138,27 +147,63 @@ object ScalafixSupport:
     args: Seq[String],
     wd: os.Path
   ): Result[Unit] =
-    if sources.isEmpty then Result.Success(())
+    run(
+      log,
+      baseArguments(scalaVersion, repositories, scalafixMvnDeps, scalafixToolClasspath),
+      ModuleInputs(
+        scalaVersion = scalaVersion,
+        scalacOptions = scalacOptions,
+        sources = sources,
+        classpath = classpath,
+        config = scalafixConfig,
+        args = args,
+        workingDirectory = wd
+      )
+    )
+
+  /** The per-module inputs of one Scalafix run: everything but the cached tool classloader. */
+  final private[mill] case class ModuleInputs(
+    scalaVersion: String,
+    scalacOptions: Seq[String],
+    sources: Seq[os.Path],
+    classpath: Seq[os.Path],
+    config: Option[os.Path],
+    args: Seq[String],
+    workingDirectory: os.Path
+  )
+
+  /**
+   * Runs Scalafix over `inputs` on top of the tool-classloader arguments `base`, which are only forced when there is
+   * something to run: a module without Scala sources succeeds without fetching or loading scalafix-cli at all. Every
+   * error Scalafix reports becomes one line of the failure message.
+   */
+  private[mill] def run(log: Logger, base: => ScalafixArguments, inputs: ModuleInputs): Result[Unit] =
+    if inputs.sources.isEmpty then Result.Success(())
     else
       // The tool classloader (scalafix-cli + rules) is cached and reused; only the cheap per-module arguments below are
       // rebuilt each call. ScalafixArguments is an immutable builder, so deriving per-module args off the shared cached
       // instance is safe under Mill's parallel module evaluation.
-      val arguments = baseArguments(scalaVersion, repositories, scalafixMvnDeps, scalafixToolClasspath)
-        .withParsedArguments(args.asJava)
-        .withWorkingDirectory(wd.toNIO)
-        .withConfig(scalafixConfig.map(_.toNIO).toJava)
-        .withClasspath(classpath.map(_.toNIO).asJava)
-        .withScalaVersion(scalaVersion)
-        .withScalacOptions(scalacOptions.asJava)
-        .withPaths(sources.map(_.toNIO).asJava)
-
-      log.info(s"Rewriting and linting ${sources.size} Scala sources against ${arguments.rulesThatWillRun.size} rules")
-      val errors = arguments.run()
+      val arguments = moduleArguments(base, inputs)
+      log.info(
+        s"Rewriting and linting ${inputs.sources.size} Scala sources against ${arguments.rulesThatWillRun.size} rules"
+      )
+      val errors    = arguments.run()
       if errors.isEmpty then Result.Success(())
       else Result.Failure(errors.map(describeError(_, arguments)).mkString("\n"))
 
+  /** `base` with the per-module `inputs` applied: CLI arguments, working directory, config, classpath and sources. */
+  private[mill] def moduleArguments(base: ScalafixArguments, inputs: ModuleInputs): ScalafixArguments =
+    base
+      .withParsedArguments(inputs.args.asJava)
+      .withWorkingDirectory(inputs.workingDirectory.toNIO)
+      .withConfig(inputs.config.map(_.toNIO).toJava)
+      .withClasspath(inputs.classpath.map(_.toNIO).asJava)
+      .withScalaVersion(inputs.scalaVersion)
+      .withScalacOptions(inputs.scalacOptions.asJava)
+      .withPaths(inputs.sources.map(_.toNIO).asJava)
+
   /** Human-readable description for a [[ScalafixError]] returned from `Scalafix.run`. */
-  private def describeError(error: ScalafixError, arguments: scalafix.interfaces.ScalafixArguments): String =
+  private[mill] def describeError(error: ScalafixError, arguments: ScalafixArguments): String =
     error match
       case ParseError             => "A source file failed to be parsed"
       case CommandLineError       =>
