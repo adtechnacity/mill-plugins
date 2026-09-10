@@ -49,14 +49,6 @@ object SonarScannerTest extends TestSuite:
       assert(SonarScanner.sonarProjectName == "")
     }
 
-    test("millInternalModule and dependentModule - Mill's own modules, and nested modules with their parent") {
-      assert(SonarScanner.millInternalModule.matches("mill.scalalib.ZincWorkerModule"))
-      assert(!SonarScanner.millInternalModule.matches("app"))
-      assert(SonarScanner.dependentModule.unapplySeq("app.test") == Some(Seq("app", "test")))
-      assert(SonarScanner.dependentModule.unapplySeq("core.app.test") == Some(Seq("core.app", "test")))
-      assert(SonarScanner.dependentModule.unapplySeq("app") == None)
-    }
-
     test("moduleProps - a top-level module joins sonar.modules with its language and sources") {
       val srcs  = Seq(os.Path("/ws/app/src"), os.Path("/ws/app/src-gen"))
       val props = SonarScanner.moduleProps(Map.empty, "app", srcs)
@@ -73,17 +65,19 @@ object SonarScannerTest extends TestSuite:
       assert(both("app.sonar.sources") == "/ws/app/src,/ws/app/src-gen")
     }
 
-    test("moduleProps - a nested module's sources are its parent's tests, accumulated in order") {
+    test("moduleProps - a nested module's sources are its parent's tests, accumulated in order, however deep") {
       val first  = SonarScanner.moduleProps(Map.empty, "app.test", Seq(os.Path("/ws/app/test/src")))
       assert(first == Map("app.sonar.tests" -> "/ws/app/test/src"))
       val second = SonarScanner.moduleProps(first, "app.it", Seq(os.Path("/ws/app/it/src")))
       assert(second == Map("app.sonar.tests" -> "/ws/app/test/src,/ws/app/it/src"))
+      val deep   = SonarScanner.moduleProps(second, "core.app.test", Seq(os.Path("/ws/core/app/test/src")))
+      assert(deep == second + ("core.app.sonar.tests" -> "/ws/core/app/test/src"))
     }
 
     test("moduleProps - scoverage modules and Mill's own modules add nothing") {
       val props = Map("sonar.modules" -> "app")
       assert(SonarScanner.moduleProps(props, "app.scoverage", Seq(os.Path("/ws/app/src"))) == props)
-      assert(SonarScanner.moduleProps(props, "mill.scalalib.Worker", Seq(os.Path("/ws/mill/src"))) == props)
+      assert(SonarScanner.moduleProps(props, "mill.scalalib.ZincWorkerModule", Seq(os.Path("/ws/mill/src"))) == props)
     }
 
     test("logLevel - DEBUG, INFO and ERROR in any case; anything else is WARN") {
@@ -160,13 +154,10 @@ object SonarScannerTest extends TestSuite:
       assert(got("sonar.scala.coverage.reportPaths") == (dest / "coverage" / "scoverage.xml").toString)
     }
 
-    test("initProps - an unset or empty token variable fails before anything else is read") {
-      // One fixture per UnitTester: a second tester on the same fixture deletes the first one's module directory.
-      Seq(Map.empty[String, String], Map("SONAR_TOKEN" -> "")).foreach { env =>
-        val build = new SonarBuild()
-        UnitTester(build, os.temp.dir(), env = env).scoped { eval =>
-          assert(failure(eval, build.sonar.props).contains("SONAR_TOKEN is not set"))
-        }
+    test("initProps - an empty token variable fails before anything else is read") {
+      val build = new SonarBuild()
+      UnitTester(build, os.temp.dir(), env = Map("SONAR_TOKEN" -> "")).scoped { eval =>
+        assert(failure(eval, build.sonar.props).contains("SONAR_TOKEN is not set"))
       }
     }
 

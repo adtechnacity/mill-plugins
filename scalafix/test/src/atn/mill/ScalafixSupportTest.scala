@@ -78,7 +78,7 @@ object ScalafixSupportTest extends TestSuite:
       assert(ScalafixSupport.scalafixConfigIn(root) == Some(root / ".scalafix.conf"))
     }
 
-    test("moduleArguments - every per-module input lands on the tool-classloader arguments") {
+    test("moduleArguments - every per-module input lands on the tool-classloader arguments; no config stays absent") {
       val fake = assembled(FakeScalafixArguments(rules = 3), inputs)
       assert(fake.rules == 3)
       assert(fake.parsedArguments == Seq("--check"))
@@ -88,9 +88,6 @@ object ScalafixSupportTest extends TestSuite:
       assert(fake.scalaVersion == Some("3.8.4"))
       assert(fake.scalacOptions == Seq("-Wunused:all"))
       assert(fake.paths == inputs.sources.map(_.toNIO))
-    }
-
-    test("moduleArguments - no workspace config is passed as an absent config") {
       assert(assembled(FakeScalafixArguments(), inputs.copy(config = None)).config == None)
     }
 
@@ -101,21 +98,6 @@ object ScalafixSupportTest extends TestSuite:
         inputs.copy(sources = Seq.empty)
       )
       assert(result == Result.Success(()))
-    }
-
-    test("run - succeeds when Scalafix reports no error") {
-      assert(ScalafixSupport.run(DummyLogger, FakeScalafixArguments(rules = 2), inputs) == Result.Success(()))
-    }
-
-    test("run - every reported error is one line of the failure, in report order") {
-      val result =
-        ScalafixSupport.run(DummyLogger, FakeScalafixArguments(errors = Seq(LinterError, NoRulesError)), inputs)
-      assert(
-        result.toEither == Left(
-          "A Scalafix linter error was reported\n" +
-            "No Scalafix rules were found. Make sure a `rules` set is defined in .scalafix.conf"
-        )
-      )
     }
 
     test("run - the failure lists the description of each error, however many and whichever they are") {
@@ -129,18 +111,14 @@ object ScalafixSupportTest extends TestSuite:
       })
     }
 
-    test("describeError - each ScalafixError has its own description, and every value has one") {
-      val fake = FakeScalafixArguments()
-      val all  = descriptions(None)
-      assert(all.keySet == ScalafixError.values().toSet)
-      all.foreach((error, description) => assert(ScalafixSupport.describeError(error, fake) == description))
-    }
-
-    test("describeError - a command-line error carries Scalafix's own validation message when there is one") {
+    test("describeError - one description per value; CommandLineError carries Scalafix's validation message") {
       val invalid = new ScalafixException("Unknown flag --no-such-flag")
-      val fake    = FakeScalafixArguments(validation = Some(invalid))
-      assert(ScalafixSupport.describeError(CommandLineError, fake) == "Unknown flag --no-such-flag")
-      assert(ScalafixSupport.describeError(ParseError, fake) == "A source file failed to be parsed")
+      Seq(None, Some(invalid)).foreach { validation =>
+        val fake = FakeScalafixArguments(validation = validation)
+        val all  = descriptions(validation)
+        assert(all.keySet == ScalafixError.values().toSet)
+        all.foreach((error, description) => assert(ScalafixSupport.describeError(error, fake) == description))
+      }
     }
 
     test("cachedArguments - the fetch runs once per key; an equal key gets the same instance without fetching") {
