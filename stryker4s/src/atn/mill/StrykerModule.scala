@@ -54,12 +54,37 @@ object StrykerModule:
     includes ++ excludedFiles.map("!" + _)
 
   /**
+   * Mirror the `.scala` files under each of `sourceDirs` into `dest`, keeping their layout relative to `workspaceDir`,
+   * and return the mirrored roots (one per source dir, in order, created even when it holds no sources). Stryker4s's
+   * `base-dir` points at `dest`, so it mutates the copies and writes its reports next to them; the module's own sources
+   * are never touched.
+   */
+  def mirrorSources(sourceDirs: Seq[os.Path], workspaceDir: os.Path, dest: os.Path): Seq[os.Path] =
+    sourceDirs.map { srcDir =>
+      val destSrcDir = dest / srcDir.relativeTo(workspaceDir)
+      os.makeDir.all(destSrcDir)
+      os.walk(srcDir).filter(_.ext == "scala").foreach { src =>
+        val target = destSrcDir / src.relativeTo(srcDir)
+        os.makeDir.all(target / os.up)
+        os.copy.over(src, target)
+      }
+      destSrcDir
+    }
+
+  /**
    * The compiler artifact for a Scala version. Scala 3 publishes `scala3-compiler_3`; Scala 2 publishes an unsuffixed
    * `scala-compiler`. Asking for `scala3-compiler_3` at a 2.13.x version resolves nothing and aborts the run before any
    * mutant is instrumented.
    */
   def compilerArtifactName(scalaVersion: String): String =
     if scalaVersion.startsWith("3") then "scala3-compiler_3" else "scala-compiler"
+
+  /**
+   * The binary version suffix of the testrunner artifact for a Scala version: every Scala 3 release shares
+   * `stryker4s-sbt-testrunner_3`, while Scala 2 publishes one artifact per minor (`_2.13`, `_2.12`).
+   */
+  def scalaBinaryVersion(scalaVersion: String): String =
+    if scalaVersion.startsWith("3") then "3" else scalaVersion.split('.').take(2).mkString(".")
 
   /**
    * The compiler entry point for a Scala version: Scala 3 compiles through `dotty.tools.dotc.Main`, Scala 2 through

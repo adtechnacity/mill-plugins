@@ -114,18 +114,7 @@ trait Stryker4sModule extends ScalaModule:
 
     // Mirror source files into Task.dest so stryker4s base-dir points here.
     // This way stryker4s writes reports directly to Task.dest/target/ — no post-run cleanup.
-    val moduleSources      = sources().map(_.path)
-    val mirroredSourceDirs = moduleSources.map { srcDir =>
-      val rel        = srcDir.relativeTo(workspaceDir)
-      val destSrcDir = dest / rel
-      os.makeDir.all(destSrcDir)
-      os.walk(srcDir).filter(_.ext == "scala").foreach { src =>
-        val target = destSrcDir / src.relativeTo(srcDir)
-        os.makeDir.all(target / os.up)
-        os.copy.over(src, target)
-      }
-      destSrcDir
-    }
+    val mirroredSourceDirs = StrykerModule.mirrorSources(sources().map(_.path), workspaceDir, dest)
     val mutatePatterns     = StrykerModule.mutatePatterns(
       mirroredSourceDirs.map(_.relativeTo(dest).toString),
       strykerIncludedFiles(),
