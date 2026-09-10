@@ -50,7 +50,7 @@ final case class FakeScalafixArguments(
     urls: JList[URL],
     deps: JList[String],
     repositories: JList[coursierapi.Repository]
-  ): ScalafixArguments = unsupported
+  ): ScalafixArguments                                                            = unsupported
   def withExcludedPaths(matchers: JList[PathMatcher]): ScalafixArguments          = unsupported
   def withMode(mode: ScalafixMainMode): ScalafixArguments                         = unsupported
   def withPrintStream(out: PrintStream): ScalafixArguments                        = unsupported
