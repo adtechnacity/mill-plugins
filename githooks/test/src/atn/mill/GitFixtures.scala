@@ -1,9 +1,6 @@
 package atn.mill
 
 import org.eclipse.jgit.api.Git
-import org.scalacheck.Prop
-import org.scalacheck.Test
-import org.scalacheck.util.Pretty
 
 /** Throwaway git repositories for the hook tests: every call starts from a fresh temporary directory. */
 object GitFixtures:
@@ -35,11 +32,3 @@ object GitFixtures:
     stage(git, "README", "hello\n")
     commit(git, "chore: initial")
     git
-
-/** ScalaCheck glue for the githooks suites. */
-object Props:
-
-  /** Fails the enclosing utest test with ScalaCheck's own summary unless `prop` holds under the default parameters. */
-  def holds(prop: Prop): Unit =
-    val result = Test.check(Test.Parameters.default, prop)
-    if !result.passed then throw new java.lang.AssertionError(Pretty.pretty(result))

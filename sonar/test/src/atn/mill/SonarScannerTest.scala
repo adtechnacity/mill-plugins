@@ -3,7 +3,7 @@ package atn.mill
 import ch.qos.logback.classic.{Level, LoggerContext}
 import ch.qos.logback.core.ConsoleAppender
 import mill.*
-import mill.api.{BuildCtx, Discover, ExecResult, PathRef, Result, SelectMode}
+import mill.api.{BuildCtx, Discover, PathRef, Result, SelectMode}
 import mill.scalalib.*
 import mill.testkit.{TestRootModule, UnitTester}
 import org.slf4j.LoggerFactory
@@ -11,6 +11,8 @@ import org.sonarsource.scanner.lib.{ScannerEngineBootstrapResult, ScannerEngineF
 import utest.*
 
 import scala.jdk.CollectionConverters.*
+
+import UnitTesterSupport.{failureOf, value}
 
 /**
  * Drives [[SonarScanner]] up to, but never into, the scanner engine: the property maps are built under `UnitTester`
@@ -23,16 +25,11 @@ object SonarScannerTest extends TestSuite:
 
   private def rootLogger = LoggerFactory.getILoggerFactory.asInstanceOf[LoggerContext].getLogger("ROOT")
 
-  /** The message `task` fails with under `eval`, or an assertion error when it does not fail. */
-  private def failure(eval: UnitTester, task: Task[?]): String = eval(task) match
-    case Left(ExecResult.Failure(msg, _)) => msg
-    case other                            => throw new java.lang.AssertionError(s"Expected a failure but got $other")
-
   /** The properties `initProps` builds for `build.sonar` under `env`, through the fixture's `props` task. */
   private def props(build: SonarBuild, env: Map[String, String], withCoverage: Boolean = false): Map[String, String] =
     UnitTester(build, os.temp.dir(), env = env).scoped { eval =>
       val task = if withCoverage then build.sonar.propsWithCoverage else build.sonar.props
-      eval(task).map(_.value).fold(f => throw new java.lang.AssertionError(s"initProps failed: $f"), identity)
+      value(eval, task)
     }
 
   val tests = Tests:
@@ -157,7 +154,7 @@ object SonarScannerTest extends TestSuite:
     test("initProps - an empty token variable fails before anything else is read") {
       val build = new SonarBuild()
       UnitTester(build, os.temp.dir(), env = Map("SONAR_TOKEN" -> "")).scoped { eval =>
-        assert(failure(eval, build.sonar.props).contains("SONAR_TOKEN is not set"))
+        assert(failureOf(eval(build.sonar.props)).contains("SONAR_TOKEN is not set"))
       }
     }
 
@@ -209,7 +206,7 @@ object SonarScannerTest extends TestSuite:
       UnitTester(build, os.temp.dir(), env = Map.empty).scoped { eval =>
         val command = build.sonar.sonar(eval.evaluator)
         assert(command.exclusive)
-        assert(failure(eval, command).contains("SONAR_TOKEN is not set"))
+        assert(failureOf(eval(command)).contains("SONAR_TOKEN is not set"))
         assert(os.exists(build.moduleDir / "out" / "app" / "coverageReport.dest"))
       }
     }

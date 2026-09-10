@@ -4,14 +4,17 @@ import mill.*
 import mill.api.{Discover, Result}
 import mill.api.daemon.Logger.DummyLogger
 import mill.scalalib.*
-import mill.testkit.{TestRootModule, UnitTester}
-import org.scalacheck.{Gen, Prop, Test => PropTest}
+import mill.testkit.TestRootModule
+import org.scalacheck.{Gen, Prop}
 import scalafix.interfaces.{ScalafixError, ScalafixException}
 import scalafix.interfaces.ScalafixError.*
 import utest.*
 
 import java.util.zip.ZipFile
 import scala.jdk.CollectionConverters.*
+
+import Props.holds
+import UnitTesterSupport.{value, withBuild}
 
 /**
  * Drives [[ScalafixSupport]] without scalafix-cli: the tool-classloader arguments are a [[FakeScalafixArguments]], so
@@ -57,18 +60,6 @@ object ScalafixSupportTest extends TestSuite:
       case fake: FakeScalafixArguments => fake
       case other                       => throw new java.lang.AssertionError(s"Not the fake arguments: $other")
 
-  /** Evaluates `task` on a fresh fixture in a fresh workspace, then `check`s the fixture and the tester's value. */
-  private def withBuild[T](check: (ScalafixBuild, UnitTester) => T): T =
-    val build = new ScalafixBuild()
-    UnitTester(build, os.temp.dir()).scoped(eval => check(build, eval))
-
-  /** The value `eval` computes for `task`, or an assertion error carrying the failure. */
-  private def value[T](eval: UnitTester, task: Task[T]): T =
-    eval(task).fold(failure => throw new java.lang.AssertionError(s"Expected success but got $failure"), _.value)
-
-  private def checkProp(prop: Prop): Unit =
-    assert(PropTest.check(prop)(identity).passed)
-
   val tests = Tests:
 
     test("scalafixConfigIn - the root's .scalafix.conf when it exists, nothing otherwise") {
@@ -102,7 +93,7 @@ object ScalafixSupportTest extends TestSuite:
 
     test("run - the failure lists the description of each error, however many and whichever they are") {
       val errors = Gen.listOf(Gen.oneOf(ScalafixError.values().toSeq))
-      checkProp(Prop.forAll(errors) { reported =>
+      holds(Prop.forAll(errors) { reported =>
         val fake     = FakeScalafixArguments(errors = reported)
         val expected =
           if reported.isEmpty then Right(())
@@ -146,7 +137,7 @@ object ScalafixSupportTest extends TestSuite:
     }
 
     test("scalafixMvnDeps, scalafixToolModules and scalafixToolClasspath - default to empty") {
-      withBuild { (build, eval) =>
+      withBuild(new ScalafixBuild()) { (build, eval) =>
         assert(build.plain.scalafixToolModules == Seq.empty)
         assert(value(eval, build.plain.scalafixMvnDeps) == Seq.empty)
         assert(value(eval, build.plain.scalafixToolClasspath) == Seq.empty)
@@ -154,7 +145,7 @@ object ScalafixSupportTest extends TestSuite:
     }
 
     test("scalafixToolClasspath - each tool module contributes its jar then its run classpath, in module order") {
-      withBuild { (build, eval) =>
+      withBuild(new ScalafixBuild()) { (build, eval) =>
         os.write(build.moduleDir / "rule" / "src" / "NoTodo.scala", "object NoTodo", createFolders = true)
         val classpath = value(eval, build.tooled.scalafixToolClasspath)
         val rule      = value(eval, build.rule.jar) +: value(eval, build.rule.runClasspath)
@@ -169,7 +160,7 @@ object ScalafixSupportTest extends TestSuite:
 
     test("scalafix and scalafixCheck - a module without Scala sources succeeds without resolving its rules") {
       // `app` declares a rule dependency that does not exist: had either command loaded Scalafix, resolving it fails.
-      withBuild { (build, eval) =>
+      withBuild(new ScalafixBuild()) { (build, eval) =>
         assert(value(eval, build.app.scalafix()) == ())
         assert(value(eval, build.app.scalafixCheck()) == ())
       }
