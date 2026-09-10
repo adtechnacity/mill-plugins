@@ -202,7 +202,12 @@ object githooks extends MillPluginModule with MillPluginMutation {
 
   def strykerTestModule = test
 
-  object test    extends MillPluginTests
+  object test    extends MillPluginTests {
+    // GitPrepCommit reads OLLAMA_URL and OLLAMA_MODEL ahead of its constructor arguments. Pin both so the suite is
+    // deterministic whatever the developer's shell exports: an empty OLLAMA_URL falls back to the configured
+    // ollamaUrl (the tests' fake server), and OLLAMA_MODEL is the name GitPrepCommitTest expects to win.
+    def forkEnv = Task { super.forkEnv() ++ Map("OLLAMA_URL" -> "", "OLLAMA_MODEL" -> "test-model-from-env") }
+  }
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(core, githooks)
   }
