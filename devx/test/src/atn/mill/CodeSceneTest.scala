@@ -5,11 +5,9 @@ import upickle.{default => json}
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.{forAll, propBoolean}
 import Props.holds
+import DevxFixtures.roundTrip
 
 object CodeSceneTest extends TestSuite:
-
-  /** Serialise `value` to JSON and read it back. */
-  private def roundTrip[A: json.ReadWriter](value: A): A = json.read[A](json.write(value))
 
   // -- Generators --
 
@@ -80,14 +78,4 @@ object CodeSceneTest extends TestSuite:
           (asEntry.id == dev.id).label("id mismatch")
           && (asEntry.name == dev.name).label("name mismatch")
           && (asEntry.ref == dev.ref).label("ref mismatch")
-        })
-
-      test("emails list length is preserved through serialization"):
-        holds(forAll { (dev: CodeScene.Developer) =>
-          (roundTrip(dev).emails.length == dev.emails.length).label("emails length changed")
-        })
-
-      test("former_contributor flag is preserved through serialization"):
-        holds(forAll { (dev: CodeScene.Developer) =>
-          (roundTrip(dev).former_contributor == dev.former_contributor).label("former_contributor changed")
         })

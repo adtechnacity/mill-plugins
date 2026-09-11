@@ -1,79 +1,48 @@
 package atn.mill
 
 import upickle.{default => json}
+import CodeScene.{DevSettingsEntry, Developer}
 
 /**
- * Client for the [[https://codescene.io CodeScene]] REST API (v2).
+ * Client for the [[https://codescene.io CodeScene]] REST API (v2). Every member is an overridable `def`: [[CodeScene]]
+ * is the client of the public deployment, reading its token from the process environment, and a build that talks to
+ * another deployment (or a test that talks to a fake) overrides [[api]] and [[getEnv]] in a subclass.
  *
  * Requires an access token via the environment variable named by [[csAccessTokenEnvVar]] (defaults to
  * `CS_ACCESS_TOKEN`).
  *
- * @groupprio Models 10
  * @groupprio DeveloperSettings 20
  * @groupprio Projects 30
  * @groupprio Analysis 40
  * @groupprio TeamManagement 50
  * @groupprio DeveloperManagement 60
  */
-object CodeScene {
+trait CodeSceneClient {
+
+  /** Base URL of the CodeScene REST API (v2). Override to point the client at another deployment or a test server. */
+  def api: String = "https://api.codescene.io/v2"
 
   /** Environment variable name for the CodeScene API access token. */
-  var csAccessTokenEnvVar: String = "CS_ACCESS_TOKEN"
-
-  // --- Models ---
+  def csAccessTokenEnvVar: String = "CS_ACCESS_TOKEN"
 
   /**
-   * Common trait for CodeScene API entities.
-   * @group Models
+   * Environment lookup behind [[token]]: the process environment (`System.getenv`). Override to take the token from
+   * elsewhere, as a test substituting a fixed map does.
    */
-  trait Entry {
-    def id: Int
-    def name: String
-    def ref: String
-  }
-
-  /**
-   * A developer-settings configuration entry.
-   * @group Models
-   */
-  case class DevSettingsEntry(id: Int, name: String, ref: String) extends Entry
-
-  object DevSettingsEntry {
-    implicit val rw: json.ReadWriter[DevSettingsEntry] = json.macroRW
-  }
-
-  /**
-   * A developer within a developer-settings configuration.
-   * @group Models
-   */
-  case class Developer(
-    id: Int,
-    name: String,
-    team_name: String,
-    email: String,
-    emails: List[String],
-    former_contributor: Boolean,
-    ref: String
-  ) extends Entry
-
-  object Developer {
-    implicit val rw: json.ReadWriter[Developer] = json.macroRW
-  }
-
-  // --- Internal plumbing ---
-
-  val api = "https://api.codescene.io/v2"
+  def getEnv(name: String): Option[String] = Option(System.getenv(name))
 
   private val DevSettings    = "/developer-settings"
   private val Projects       = "/projects"
   private val AnalysesLatest = "/analyses/latest"
   private val JsonContent    = "Content-Type" -> "application/json"
 
-  def token = Option(System.getenv(csAccessTokenEnvVar))
+  /** The access token from the environment variable named by [[csAccessTokenEnvVar]]; fails when unset or empty. */
+  def token: String = getEnv(csAccessTokenEnvVar)
     .filter(_.nonEmpty)
     .getOrElse(throw new RuntimeException(s"Environment variable $csAccessTokenEnvVar is not set or empty"))
 
-  def headers = Map("Accept" -> "application/json", "Authorization" -> s"Bearer $token")
+  /** The headers every request carries: JSON accepted, bearer [[token]]. */
+  def headers: Map[String, String] = Map("Accept" -> "application/json", "Authorization" -> s"Bearer $token")
 
   private def get(path: String): ujson.Value =
     ujson.read(requests.get(url = s"$api$path", headers = headers).text())
@@ -108,7 +77,7 @@ object CodeScene {
    * List teams within a developer-settings configuration.
    * @group DeveloperSettings
    */
-  def teams(devSettingId: Int) =
+  def teams(devSettingId: Int): List[DevSettingsEntry] =
     json.read[List[DevSettingsEntry]](get(s"${devSettingPath(devSettingId)}/teams").obj("teams"))
 
   /**
@@ -122,7 +91,7 @@ object CodeScene {
    * List developers within a developer-settings configuration.
    * @group DeveloperSettings
    */
-  def developers(devSettingId: Int) =
+  def developers(devSettingId: Int): List[Developer] =
     json.read[List[Developer]](get(s"${devSettingPath(devSettingId)}/developers").obj("developers"))
 
   /**
@@ -253,4 +222,50 @@ object CodeScene {
       s"${devSettingPath(devSettingId)}/developers/$devId",
       ujson.Obj("team_id" -> teamId, "former_contributor" -> formerContributor)
     )
+}
+
+/**
+ * The [[CodeSceneClient]] of the public CodeScene deployment, and the models its endpoints decode.
+ *
+ * @groupprio Models 10
+ */
+object CodeScene extends CodeSceneClient {
+
+  /**
+   * Common trait for CodeScene API entities.
+   * @group Models
+   */
+  trait Entry {
+    def id: Int
+    def name: String
+    def ref: String
+  }
+
+  /**
+   * A developer-settings configuration entry.
+   * @group Models
+   */
+  case class DevSettingsEntry(id: Int, name: String, ref: String) extends Entry
+
+  object DevSettingsEntry {
+    implicit val rw: json.ReadWriter[DevSettingsEntry] = json.macroRW
+  }
+
+  /**
+   * A developer within a developer-settings configuration.
+   * @group Models
+   */
+  case class Developer(
+    id: Int,
+    name: String,
+    team_name: String,
+    email: String,
+    emails: List[String],
+    former_contributor: Boolean,
+    ref: String
+  ) extends Entry
+
+  object Developer {
+    implicit val rw: json.ReadWriter[Developer] = json.macroRW
+  }
 }
