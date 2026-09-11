@@ -130,15 +130,13 @@ object DeveloperExperienceIntegrationTest extends TestSuite:
       test("accessToken cache - reuses token on second call"):
         if !hasPortIOCredentials then "skipped - no PORT_CLIENT_ID/PORT_CLIENT_SECRET"
         else
-          // Reset cache
-          PortIO.accessTokenCache = None
-          val token1       = PortIO.accessToken
+          // A fresh client, so its token cache starts empty
+          val client = new PortIOClient {}
+          val token1 = client.accessToken
           assert(token1.nonEmpty)
           // Second call should use cache
-          val cachedBefore = PortIO.accessTokenCache
-          val token2       = PortIO.accessToken
+          val token2 = client.accessToken
           assert(token1 == token2)
-          assert(PortIO.accessTokenCache == cachedBefore)
           "Token cache working correctly"
 
     // -- DeveloperExperience helper tests with live data --

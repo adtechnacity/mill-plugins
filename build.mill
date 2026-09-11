@@ -274,6 +274,18 @@ object devx extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-devx_mill1"
   def mvnDeps      = Seq(mvn"com.lihaoyi::requests:0.9.3", mvn"com.lihaoyi::upickle:4.4.3")
 
+  // The CodeScene and PortIO clients are traits of overridable defs (CodeSceneClient, PortIOClient) rather than
+  // objects of reassignable vars: the setters of the former `var`s are gone, and the Port.io token cache is private.
+  // Breaking change: a build configures a client by overriding DeveloperExperience.codeScene / portIO instead.
+  override def mimaBinaryIssueFilters =
+    super.mimaBinaryIssueFilters() ++ Seq(
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.CodeScene.csAccessTokenEnvVar_="),
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.PortIO.portClientIdEnvVar_="),
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.PortIO.portClientSecretEnvVar_="),
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.PortIO.accessTokenCache"),
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.PortIO.accessTokenCache_=")
+    )
+
   def strykerTestModule = test
 
   object test    extends MillPluginTests
