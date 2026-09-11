@@ -4,7 +4,7 @@ import org.scalacheck.{Gen, Prop}
 import org.scalacheck.Prop.propBoolean
 import utest._
 
-import PropertyCheck.holds
+import Props.holds
 
 object ConventionalCommitTest extends TestSuite:
   import Prop.forAll
