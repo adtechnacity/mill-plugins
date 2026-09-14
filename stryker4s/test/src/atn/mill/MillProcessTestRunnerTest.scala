@@ -64,7 +64,7 @@ object MillProcessTestRunnerTest extends TestSuite:
           "-Xmx1G",
           "-Dfoo=bar",
           s"-D${TestProcessProperties.unixSocketPath}=$socket",
-          "stryker4s.sbt.testrunner.SbtTestRunnerMain"
+          "stryker4s.testrunner.TestRunnerMain"
         )
       )
       // The test module's forkEnv reaches the server process untouched (MILL_TEST_RESOURCE_DIR-style variables).

@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.*
 
 /**
- * Socket connection to a forked `stryker4s-sbt-testrunner` server process: length-delimited protobuf
+ * Socket connection to a forked `stryker4s-testrunner` server process: length-delimited protobuf
  * [[Request]]/[[Response]] messages over a unix domain socket.
  *
  * Port of stryker4s' sbt-plugin `SocketTestRunnerConnection` (Apache-2.0), which lives in the Scala 2.12 sbt-plugin
@@ -58,7 +58,7 @@ object MillTestRunnerConnection:
   yield new MillTestRunnerConnection(socket, input)
 
 /**
- * Mill port of stryker4s' sbt-plugin `ProcessTestRunner` (Apache-2.0): drives one long-lived forked `SbtTestRunnerMain`
+ * Mill port of stryker4s' sbt-plugin `ProcessTestRunner` (Apache-2.0): drives one long-lived forked `TestRunnerMain`
  * server over a socket. The server activates mutations in-process (no JVM start per mutant), runs ONLY the tests
  * covering each mutant, fails early on the first kill, and collects per-test coverage during the initial run — which is
  * what lets stryker4s core hand each mutant its covering tests. The message mapping is what the tests script a stand-in
@@ -134,7 +134,7 @@ object MillProcessTestRunner:
   private val classPathSeparator = java.io.File.pathSeparator
 
   /**
-   * What a forked `SbtTestRunnerMain` server is started with. `javaOpts` (the test module's `forkArgs` followed by the
+   * What a forked `TestRunnerMain` server is started with. `javaOpts` (the test module's `forkArgs` followed by the
    * stryker options) go between the classpath and the socket property; `env` is the test module's `forkEnv`, so the
    * variables Mill's own runner would set (`MILL_TEST_RESOURCE_DIR`, ...) reach the tests under mutation as well. The
    * server runs in `workingDir` (stryker4s's tmp copy of the sources) but logs to `logDir`: stryker4s deletes the tmp
@@ -160,7 +160,7 @@ object MillProcessTestRunner:
   def processSpec(server: ServerConfig, socketPath: os.Path): TestRunnerProcess =
     val args    = List("-cp", server.classpath.map(_.toString).mkString(classPathSeparator)) ++
       server.javaOpts ++
-      List(s"-D${TestProcessProperties.unixSocketPath}=$socketPath", "stryker4s.sbt.testrunner.SbtTestRunnerMain")
+      List(s"-D${TestProcessProperties.unixSocketPath}=$socketPath", "stryker4s.testrunner.TestRunnerMain")
     // Server output goes to a log file, NEVER an inherited pipe: the initial run streams the whole suite's test
     // output, and a pipe with no active reader would fill up and block the server (and with it the whole run).
     val logFile = server.logDir / s"testrunner-${ProcessHandle.current().pid()}-${System.nanoTime()}.log"
