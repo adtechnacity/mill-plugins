@@ -233,7 +233,7 @@ object sonar extends MillPluginModule with MillPluginMutation {
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
     mvn"org.sonarsource.scanner.lib:sonar-scanner-java-library:4.1.1.1633",
-    mvn"ch.qos.logback:logback-classic:1.6.1",
+    mvn"ch.qos.logback:logback-classic:1.6.3",
     mvn"org.typelevel::cats-core:2.13.0"
   )
 
