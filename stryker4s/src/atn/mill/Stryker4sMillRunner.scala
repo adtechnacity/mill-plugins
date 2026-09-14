@@ -17,7 +17,7 @@ import scala.concurrent.duration.FiniteDuration
  *
  * Uses `InstrumenterOptions.testRunner`, so the instrumented code reports per-test '''coverage''' through
  * `stryker4s.coverage.coverMutant` and activates mutations in-process via `stryker4s.activeMutation` — both provided by
- * the forked `stryker4s-sbt-testrunner` server [[MillProcessTestRunner]] talks to. Each mutant therefore runs only the
+ * the forked `stryker4s-testrunner` server [[MillProcessTestRunner]] talks to. Each mutant therefore runs only the
  * tests that cover it, inside a warm long-lived JVM, instead of the whole suite in a fresh fork.
  *
  * @param testClasspath
@@ -183,8 +183,8 @@ object Stryker4sMillRunner:
     Option(classOf[Stryker4sRunner].getPackage.getImplementationVersion).getOrElse("0.21.0")
 
   /**
-   * Resolve `stryker4s-sbt-testrunner` (plain Scala 3, sbt-free) with its transitive deps via coursier. Package-private
-   * so the tests can check what ends up on the server's classpath.
+   * Resolve `stryker4s-testrunner` (plain Scala 3, sbt-free) with its transitive deps via coursier. Package-private so
+   * the tests can check what ends up on the server's classpath.
    */
   private[mill] def resolveTestRunnerArtifact(scalaVersion: String): Seq[os.Path] =
     @annotation.nowarn("msg=deprecated")
@@ -194,7 +194,7 @@ object Stryker4sMillRunner:
         coursier.Dependency(
           coursier.Module(
             coursier.Organization("io.stryker-mutator"),
-            coursier.ModuleName(s"stryker4s-sbt-testrunner_${StrykerModule.scalaBinaryVersion(scalaVersion)}")
+            coursier.ModuleName(s"stryker4s-testrunner_${StrykerModule.scalaBinaryVersion(scalaVersion)}")
           ),
           stryker4sVersion
         )

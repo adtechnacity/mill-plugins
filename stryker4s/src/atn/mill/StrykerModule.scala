@@ -81,7 +81,7 @@ object StrykerModule:
 
   /**
    * The binary version suffix of the testrunner artifact for a Scala version: every Scala 3 release shares
-   * `stryker4s-sbt-testrunner_3`, while Scala 2 publishes one artifact per minor (`_2.13`, `_2.12`).
+   * `stryker4s-testrunner_3`, while Scala 2 publishes one artifact per minor (`_2.13`, `_2.12`).
    */
   def scalaBinaryVersion(scalaVersion: String): String =
     if scalaVersion.startsWith("3") then "3" else scalaVersion.split('.').take(2).mkString(".")

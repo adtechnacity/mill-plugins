@@ -91,7 +91,7 @@ object StrykerTestSupport:
       case Left(ExecResult.Failure(msg, failure)) => throw new AssertionError(s"$selector failed: $msg $failure")
 
   /**
-   * A stand-in for the forked `SbtTestRunnerMain` server: listens on a fresh unix socket and answers the `n`-th request
+   * A stand-in for the forked `TestRunnerMain` server: listens on a fresh unix socket and answers the `n`-th request
    * with `script(n, request)`, or hangs up when that is `None`. Serves one client, in a daemon thread, for the duration
    * of `body`.
    */

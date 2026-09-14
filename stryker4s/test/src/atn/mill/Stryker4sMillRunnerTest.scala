@@ -134,8 +134,8 @@ object Stryker4sMillRunnerTest extends TestSuite:
 
     test("resolveTestRunnerArtifact - the testrunner and its runtime, without its own Scala stdlib") {
       val names = Stryker4sMillRunner.resolveTestRunnerArtifact(scalaVersion).map(_.last)
-      assert(names.contains("stryker4s-sbt-testrunner_3-0.21.0.jar"))
-      assert(names.contains("stryker4s-testrunner-api_3-0.21.0.jar"))
+      assert(names.contains("stryker4s-testrunner_3-1.1.1.jar"))
+      assert(names.contains("stryker4s-testrunner-api_3-1.1.1.jar"))
       assert(names.exists(_.startsWith("scalapb-runtime_3-")))
       // The module's own classpath provides the stdlib; the testrunner's would shadow it, being built against an older Scala.
       assert(!names.exists(name => name.startsWith("scala3-library") || name.startsWith("scala-library")))
