@@ -218,7 +218,7 @@ object FakePulumi:
 
 /** A [[PulumiModule]] whose program jar is never built: the tasks under test only write its path into Pulumi.yaml. */
 trait StubbedPulumiModule extends PulumiModule:
-  def scalaVersion = "3.9.0"
+  def scalaVersion = "3.8.4"
 
   override def assembly = Task {
     val jar = Task.dest / "out.jar"

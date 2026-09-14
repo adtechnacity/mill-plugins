@@ -243,15 +243,15 @@ trait ExampleSonar extends SonarScanner:
 // directory.
 abstract class SonarRoot extends TestRootModule:
   object app extends ScalaModule:
-    def scalaVersion   = "3.9.0"
+    def scalaVersion   = "3.8.4"
     def coverageReport = Task(PathRef(Task.dest))
     object test      extends ScalaModule:
-      def scalaVersion = "3.9.0"
+      def scalaVersion = "3.8.4"
     object scoverage extends ScalaModule:
-      def scalaVersion = "3.9.0"
+      def scalaVersion = "3.8.4"
 
   object lib extends ScalaModule:
-    def scalaVersion     = "3.9.0"
+    def scalaVersion     = "3.8.4"
     override def sources = Task.Sources("src", "src-extra")
 
   object sonar extends ExampleSonar:
@@ -274,9 +274,9 @@ class SonarBuild extends SonarRoot:
 class RootSourcesBuild extends TestRootModule:
   def sources = Task.Sources("src")
   object app extends ScalaModule:
-    def scalaVersion = "3.9.0"
+    def scalaVersion = "3.8.4"
     object test extends ScalaModule:
-      def scalaVersion = "3.9.0"
+      def scalaVersion = "3.8.4"
   lazy val millDiscover: Discover = Discover[this.type]
 
 class NoSourcesBuild extends TestRootModule:
