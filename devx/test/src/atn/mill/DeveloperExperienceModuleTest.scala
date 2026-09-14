@@ -5,7 +5,7 @@ import upickle.{default => json}
 import mill.api.{Discover, ExecResult, Task}
 import mill.testkit.{TestRootModule, UnitTester}
 import org.scalacheck.Prop.{forAll, propBoolean}
-import PropertyChecks.checkProp
+import Props.holds
 import FakeApi.*
 import DevxFixtures.*
 
@@ -195,7 +195,7 @@ object DeveloperExperienceModuleTest extends TestSuite:
         }
 
     test("formatDeveloper - lists name, team, email and the former-contributor flag"):
-      checkProp(forAll(CodeSceneTest.genDeveloper) { dev =>
+      holds(forAll(CodeSceneTest.genDeveloper) { dev =>
         val fields   = formatDeveloper(dev).split(" \\| ", -1).toList
         val expected =
           List(dev.name, s"team=${dev.team_name}", s"email=${dev.email}", s"former=${dev.former_contributor}")

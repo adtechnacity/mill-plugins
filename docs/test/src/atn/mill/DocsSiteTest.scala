@@ -9,16 +9,14 @@ import utest.*
 
 import java.io.{ByteArrayOutputStream, PrintStream}
 
+import UnitTesterSupport.value
+
 /**
  * Drives the site-building tasks of [[DocsModule]] through `UnitTester`. The documented module stubs its compilation
  * and classpaths, and the scaladoc the plugin forks is [[FakeScaladoc]], so a run takes well under a second and every
  * argument the plugin assembles can be asserted on.
  */
 object DocsSiteTest extends TestSuite:
-
-  /** The value `task` evaluates to under `eval`; an assertion error otherwise. */
-  private def value[T](eval: UnitTester, task: Task[T]): T =
-    eval(task).fold(failure => throw new java.lang.AssertionError(s"task failed: $failure"), _.value)
 
   /** A workspace with a README referencing a missing image and, optionally, a hand-authored docs/ page. */
   private def workspace(withDocsDir: Boolean): os.Path =
@@ -28,11 +26,18 @@ object DocsSiteTest extends TestSuite:
     if withDocsDir then os.write(root / "docs" / "_docs" / "hand.md", "# Hand written\n", createFolders = true)
     root
 
-  /** `body` under a tester over `ws`, with what it wrote to stdout and stderr: (result, out, err). */
+  /**
+   * `body` under a tester over `ws`, with what it wrote to stdout and stderr: (result, out, err). Task output reaches
+   * the streams through the prompt logger's pumper thread, which the tester's own close never joins; closing the logger
+   * here (`PromptLogger.close` ends its pipe and joins the pumper) is what makes the text complete when read.
+   */
   private def captured[T](build: SiteBuild, ws: os.Path)(body: UnitTester => T): (T, String, String) =
     val out    = new ByteArrayOutputStream
     val err    = new ByteArrayOutputStream
-    val result = UnitTester(build, ws, outStream = new PrintStream(out), errStream = new PrintStream(err)).scoped(body)
+    val tester = UnitTester(build, ws, outStream = new PrintStream(out), errStream = new PrintStream(err))
+    val result =
+      try tester.scoped(body)
+      finally tester.logger.close()
     (result, out.toString, err.toString)
 
   /** The scaladoc arguments every run starts with, up to where the extra options go. */
@@ -97,11 +102,13 @@ object DocsSiteTest extends TestSuite:
       }
     }
 
-    test("listModules - prints the documented modules") {
-      val build       = new SiteBuild
-      val (_, out, _) = captured(build, workspace(withDocsDir = true))(eval => value(eval, build.docs.listModules()))
-      assert(out.linesIterator.contains("lib"))
-      assert(!out.contains("docs"))
+    test("listModules - the documented modules, one segment path per line, sorted") {
+      val build  = new SiteBuild
+      // Asserted on the data the command prints from rather than on the tester's stdout, as the release suite does:
+      // the print reaches the stream through the prompt logger's pumper thread. The command still runs.
+      val listed = build.docs.allModules.map(_.moduleSegments.render).sorted
+      assert(listed == Seq("lib"))
+      UnitTester(build, workspace(withDocsDir = true)).scoped(eval => value(eval, build.docs.listModules()))
     }
 
     test("local - forks scaladoc over the documented classes with the site root and no deployment options") {

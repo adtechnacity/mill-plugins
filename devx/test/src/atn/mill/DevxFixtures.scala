@@ -60,3 +60,9 @@ object DevxFixtures:
 
   /** Both services. */
   val services: PartialFunction[Received, Reply] = codeScene.orElse(port)
+
+  /**
+   * Serialises `value` to JSON and reads it back. It lives here, not in the shared [[Props]], because upickle is a
+   * devx-only dependency: every module's test sources compile that one directory.
+   */
+  def roundTrip[A: json.ReadWriter](value: A): A = json.read[A](json.write(value))

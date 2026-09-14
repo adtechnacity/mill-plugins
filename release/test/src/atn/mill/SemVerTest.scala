@@ -4,7 +4,7 @@ import org.scalacheck.Gen
 import org.scalacheck.Prop.{forAll, propBoolean}
 import utest._
 
-import PropertyCheck.holds
+import Props.holds
 
 object SemVerTest extends TestSuite:
 

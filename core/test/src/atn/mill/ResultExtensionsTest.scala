@@ -2,10 +2,12 @@ package atn.mill
 
 import mill.api.daemon.Result
 
-import org.scalacheck.{Prop, Test as PropTest}
+import org.scalacheck.Prop
 import utest.*
 
 import scala.jdk.CollectionConverters.*
+
+import Props.holds
 
 object ResultExtensionsTest extends TestSuite:
 
@@ -19,8 +21,6 @@ object ResultExtensionsTest extends TestSuite:
   private def failing: Result[String] = Result.Failure("not available")
 
   private def throwing: Result[String] = throw new IllegalStateException("could not even try")
-
-  private def holds(prop: Prop): Unit = assert(PropTest.check(prop)(identity).passed)
 
   val tests = Tests:
 

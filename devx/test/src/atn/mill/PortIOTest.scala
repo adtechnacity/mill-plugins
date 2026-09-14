@@ -5,8 +5,8 @@ import org.scalacheck.Gen
 import org.scalacheck.Prop.{forAll, propBoolean}
 import upickle.{default => json}
 import FakeApi.*
-import DevxFixtures.{port, token}
-import PropertyChecks.{checkProp, roundTrip}
+import DevxFixtures.{port, roundTrip, token}
+import Props.holds
 
 import java.util.concurrent.atomic.AtomicLong
 
@@ -121,8 +121,8 @@ object PortIOTest extends TestSuite:
         }
 
     test("Entity - round-trips through JSON, defaults included"):
-      checkProp(forAll(genEntity)(entity => (roundTrip(entity) == entity).label(s"round trip changed $entity")))
+      holds(forAll(genEntity)(entity => (roundTrip(entity) == entity).label(s"round trip changed $entity")))
       assert(roundTrip(PortIO.Entity("1", "One")) == PortIO.Entity("1", "One", "", "", ujson.Obj(), ujson.Obj()))
 
     test("TokenResponse - round-trips through JSON"):
-      checkProp(forAll(genToken)(response => (roundTrip(response) == response).label(s"round trip changed $response")))
+      holds(forAll(genToken)(response => (roundTrip(response) == response).label(s"round trip changed $response")))

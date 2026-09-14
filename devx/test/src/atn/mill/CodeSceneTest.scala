@@ -4,7 +4,8 @@ import utest._
 import upickle.{default => json}
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.{forAll, propBoolean}
-import PropertyChecks.{checkProp, roundTrip}
+import Props.holds
+import DevxFixtures.roundTrip
 
 object CodeSceneTest extends TestSuite:
 
@@ -39,18 +40,18 @@ object CodeSceneTest extends TestSuite:
     test("DevSettingsEntry"):
 
       test("round-trip serialization identity"):
-        checkProp(forAll { (entry: CodeScene.DevSettingsEntry) =>
+        holds(forAll { (entry: CodeScene.DevSettingsEntry) =>
           val roundTripped = roundTrip(entry)
           (roundTripped == entry).label(s"round-trip failed for $entry, got $roundTripped")
         })
 
       test("list round-trip serialization identity"):
-        checkProp(forAll(Gen.listOf(genDevSettingsEntry)) { entries =>
+        holds(forAll(Gen.listOf(genDevSettingsEntry)) { entries =>
           (roundTrip(entries) == entries).label("list round-trip failed")
         })
 
       test("implements Entry trait with correct field projection"):
-        checkProp(forAll { (entry: CodeScene.DevSettingsEntry) =>
+        holds(forAll { (entry: CodeScene.DevSettingsEntry) =>
           val asEntry: CodeScene.Entry = entry
           (asEntry.id == entry.id).label("id mismatch")
           && (asEntry.name == entry.name).label("name mismatch")
@@ -58,7 +59,7 @@ object CodeSceneTest extends TestSuite:
         })
 
       test("JSON contains all fields"):
-        checkProp(forAll { (entry: CodeScene.DevSettingsEntry) =>
+        holds(forAll { (entry: CodeScene.DevSettingsEntry) =>
           val parsed = ujson.read(json.write(entry))
           parsed.obj.contains("id").label("missing id")
           && parsed.obj.contains("name").label("missing name")
@@ -69,10 +70,10 @@ object CodeSceneTest extends TestSuite:
     test("Developer"):
 
       test("round-trip serialization identity"):
-        checkProp(forAll((dev: CodeScene.Developer) => (roundTrip(dev) == dev).label(s"round-trip failed for $dev")))
+        holds(forAll((dev: CodeScene.Developer) => (roundTrip(dev) == dev).label(s"round-trip failed for $dev")))
 
       test("implements Entry trait with correct field projection"):
-        checkProp(forAll { (dev: CodeScene.Developer) =>
+        holds(forAll { (dev: CodeScene.Developer) =>
           val asEntry: CodeScene.Entry = dev
           (asEntry.id == dev.id).label("id mismatch")
           && (asEntry.name == dev.name).label("name mismatch")

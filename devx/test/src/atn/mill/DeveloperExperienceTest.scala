@@ -3,14 +3,14 @@ package atn.mill
 import utest._
 import org.scalacheck.{Arbitrary, Gen, Prop}
 import org.scalacheck.Prop.{forAll, propBoolean}
-import PropertyChecks.checkProp
+import Props.holds
 
 object DeveloperExperienceTest extends TestSuite:
   import DeveloperExperience.*
 
   /** `teamsToCreate` over generated team names and existing teams, handed to `check` as (all, existing, result). */
   private def forAllTeamsToCreate(check: (List[String], Set[String], List[String]) => Prop): Unit =
-    checkProp(forAll(genTeamNames, genTeamNames) { (allNames, existingNames) =>
+    holds(forAll(genTeamNames, genTeamNames) { (allNames, existingNames) =>
       val existing = existingNames.toSet
       check(allNames, existing, teamsToCreate(mkTeamsJson(allNames), existing))
     })
@@ -54,14 +54,14 @@ object DeveloperExperienceTest extends TestSuite:
     test("slugify"):
 
       test("idempotency - applying slugify twice yields the same result"):
-        checkProp(forAll(genSlugInput) { input =>
+        holds(forAll(genSlugInput) { input =>
           val once  = slugify(input)
           val twice = slugify(once)
           (twice == once).label(s"slugify not idempotent: '$input' -> '$once' -> '$twice'")
         })
 
       test("output contains only lowercase alphanumeric and dashes"):
-        checkProp(forAll(genSlugInput) { input =>
+        holds(forAll(genSlugInput) { input =>
           val result = slugify(input)
           result
             .forall(c => c.isLetter && c.isLower || c.isDigit || c == '-')
@@ -69,21 +69,21 @@ object DeveloperExperienceTest extends TestSuite:
         })
 
       test("no leading or trailing dashes"):
-        checkProp(forAll(genSlugInput) { input =>
+        holds(forAll(genSlugInput) { input =>
           val result = slugify(input)
           (result.isEmpty || (!result.startsWith("-") && !result.endsWith("-")))
             .label(s"leading/trailing dash in slugify('$input') = '$result'")
         })
 
       test("no consecutive dashes"):
-        checkProp(forAll(genSlugInput) { input =>
+        holds(forAll(genSlugInput) { input =>
           val result = slugify(input)
           (!result.contains("--"))
             .label(s"consecutive dashes in slugify('$input') = '$result'")
         })
 
       test("output length never exceeds input length"):
-        checkProp(forAll(genSlugInput) { input =>
+        holds(forAll(genSlugInput) { input =>
           val result = slugify(input)
           (result.length <= input.length)
             .label(s"slugify('$input') = '$result' is longer than input")
@@ -92,7 +92,7 @@ object DeveloperExperienceTest extends TestSuite:
     test("writeJson"):
 
       test("round-trip: creates the parent directories and reads back what it wrote"):
-        checkProp(forAll(Gen.alphaNumStr.suchThat(_.nonEmpty), Gen.chooseNum(-100, 100)) { (key, value) =>
+        holds(forAll(Gen.alphaNumStr.suchThat(_.nonEmpty), Gen.chooseNum(-100, 100)) { (key, value) =>
           val tmp      = os.temp.dir()
           val path     = tmp / "sub" / "dir" / "data.json"
           val data     = ujson.Obj(key -> value)
@@ -118,13 +118,13 @@ object DeveloperExperienceTest extends TestSuite:
         assert(content.contains("  "))
 
     test("tryFetch - recovers from exception without throwing"):
-      checkProp(forAll(Gen.alphaNumStr) { msg =>
+      holds(forAll(Gen.alphaNumStr) { msg =>
         tryFetch("test", "proj")(throw new RuntimeException(msg))
         Prop.passed
       })
 
     test("teamNames - extracts exactly the name field from each team object"):
-      checkProp(forAll(genTeamNames) { names =>
+      holds(forAll(genTeamNames) { names =>
         val json   = mkTeamsJson(names)
         val result = teamNames(json)
         (result == names).label(s"expected $names, got $result")
@@ -158,7 +158,7 @@ object DeveloperExperienceTest extends TestSuite:
         }
 
       test("with empty existing set, returns all team names"):
-        checkProp(forAll(genTeamNames) { names =>
+        holds(forAll(genTeamNames) { names =>
           val json   = mkTeamsJson(names)
           val result = teamsToCreate(json, Set.empty)
           (result == names).label(s"expected all names $names, got $result")
@@ -167,7 +167,7 @@ object DeveloperExperienceTest extends TestSuite:
     test("resolveDevAssignments"):
 
       test("result only contains devs whose team is in teamsByName"):
-        checkProp(forAll(Gen.listOf(genDevEntry), genTeamNames) { (devEntries, extraTeamNames) =>
+        holds(forAll(Gen.listOf(genDevEntry), genTeamNames) { (devEntries, extraTeamNames) =>
           val allTeamNames = (devEntries.map(_._2) ++ extraTeamNames).distinct
           val teamsByName  = allTeamNames.zipWithIndex.toMap
           val devsJson     = mkDevsJson(devEntries)
@@ -177,14 +177,14 @@ object DeveloperExperienceTest extends TestSuite:
         })
 
       test("skips devs with unknown teams"):
-        checkProp(forAll(Gen.listOf(genDevEntry)) { devEntries =>
+        holds(forAll(Gen.listOf(genDevEntry)) { devEntries =>
           val devsJson = mkDevsJson(devEntries)
           val result   = resolveDevAssignments(devsJson, Map.empty)
           result.isEmpty.label(s"expected empty, got $result")
         })
 
       test("preserves formerContributor flag"):
-        checkProp(forAll(Gen.listOf(genDevEntry)) { devEntries =>
+        holds(forAll(Gen.listOf(genDevEntry)) { devEntries =>
           val teamsByName = devEntries.map(_._2).distinct.zipWithIndex.toMap
           val devsJson    = mkDevsJson(devEntries)
           val result      = resolveDevAssignments(devsJson, teamsByName)
@@ -194,7 +194,7 @@ object DeveloperExperienceTest extends TestSuite:
         })
 
       test("result length never exceeds input dev count"):
-        checkProp(forAll(Gen.listOf(genDevEntry), Gen.mapOf(Gen.zip(genTeamName, Gen.posNum[Int]))) {
+        holds(forAll(Gen.listOf(genDevEntry), Gen.mapOf(Gen.zip(genTeamName, Gen.posNum[Int]))) {
           (devEntries, teamsByName) =>
             val devsJson = mkDevsJson(devEntries)
             val result   = resolveDevAssignments(devsJson, teamsByName)

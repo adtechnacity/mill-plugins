@@ -5,6 +5,8 @@ import mill._
 import mill.api.{Discover, ExecResult, Result}
 import mill.testkit.{TestRootModule, UnitTester}
 
+import UnitTesterSupport.{failureOf, withBuild}
+
 /**
  * [[GitHooksModule]] as a build sees it: its defaults, module discovery, and the hook commands driven through Mill's
  * `UnitTester`. The commit-message commands open the enclosing checkout through `GitRepo`, so they run inside one.
@@ -16,17 +18,6 @@ object GitHooksModuleTest extends TestSuite:
     val ws = os.temp.dir()
     os.makeDir.all(ws / ".git" / "hooks")
     ws
-
-  /** Runs `body` with a UnitTester over a fresh `HooksBuild` copied from `workspace`. */
-  private def withBuild[T](build: HooksRoot = new HooksBuild(), workspace: os.Path = os.temp.dir())(
-    body: (HooksRoot, UnitTester) => T
-  ): T =
-    UnitTester(build, workspace).scoped(eval => body(build, eval))
-
-  /** The message the failed run `result` reports; a success is a test failure. */
-  private def failureOf(result: Either[ExecResult.Failing[?], ?]): String = result match
-    case Left(ExecResult.Failure(msg, _)) => msg
-    case other                            => throw new java.lang.AssertionError(s"expected a failure, got $other")
 
   /** The `WorkDone` value an `install` run returned. */
   private def workDone(result: Either[ExecResult.Failing[?], UnitTester.Result[Seq[?]]]): Int = result match
@@ -73,7 +64,7 @@ object GitHooksModuleTest extends TestSuite:
     }
 
     test("install - writes the four hooks under the workspace's .git/hooks, again only when forced") {
-      withBuild(workspace = workspaceWithHooksDir()) { (build, eval) =>
+      withBuild(new HooksBuild(), workspaceWithHooksDir()) { (build, eval) =>
         assert(workDone(eval("install")) == 15)
         assert(os.read(build.moduleDir / ".git" / "hooks" / "commit-msg").contains("git.validateCommit"))
         assert(workDone(eval("install")) == 0)
@@ -82,14 +73,14 @@ object GitHooksModuleTest extends TestSuite:
     }
 
     test("install - fails naming the hook when the workspace has no .git/hooks directory") {
-      withBuild() { (build, eval) =>
+      withBuild(new HooksBuild()) { (build, eval) =>
         val msg = failureOf(eval("install"))
         assert(msg.startsWith(s"${build.moduleDir / ".git" / "hooks" / "pre-commit"} was not written"))
       }
     }
 
     test("validateCommit - accepts a scope that is a module of the build and rejects one that is not") {
-      withBuild() { (_, eval) =>
+      withBuild(new HooksBuild()) { (_, eval) =>
         assert(eval("validateCommit", "--file", messageFile("feat(core): add the greeting\n")).isRight)
         val msg = failureOf(eval("validateCommit", "--file", messageFile("feat(nope): add the greeting\n")))
         assert(msg.contains("* nope is not a valid module"))
@@ -104,7 +95,7 @@ object GitHooksModuleTest extends TestSuite:
     }
 
     test("prepCommit - a non-commit source leaves the message file untouched") {
-      withBuild() { (_, eval) =>
+      withBuild(new HooksBuild()) { (_, eval) =>
         val file = messageFile("Merge branch 'topic'\n")
         assert(eval("prepCommit", "--file", file, "--source", "merge").isRight)
         assert(os.read(os.Path(file)) == "Merge branch 'topic'\n")

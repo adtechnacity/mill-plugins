@@ -39,6 +39,10 @@ trait MillPluginModule extends ScalaModule with PublishModule with Mima with Sco
       mvn"org.scalacheck::scalacheck:1.19.0"
     )
     def testFramework = "utest.runner.Framework"
+
+    // The scaffolding every unit suite shares (test-support/src) is compiled into each test module from that one
+    // directory, as example-tests/src is into every example module; the module's own src follows it.
+    def sources = Task.Sources(build.moduleDir / "test-support" / "src", moduleDir / "src")
   }
 
   trait MillPluginExampleTests extends ScalaTests {

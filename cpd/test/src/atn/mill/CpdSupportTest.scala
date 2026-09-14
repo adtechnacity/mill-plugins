@@ -1,10 +1,12 @@
 package atn.mill
 
 import mill.*
-import mill.api.{Discover, ExecResult, ModuleRef}
+import mill.api.{Discover, ModuleRef}
 import mill.scalalib.*
 import mill.testkit.{TestRootModule, UnitTester}
 import utest.*
+
+import UnitTesterSupport.{failureOf, value}
 
 /**
  * Drives [[CpdSupport]] through Mill's `UnitTester` over the example workspace, whose `a/src/Dup.scala` and
@@ -19,17 +21,9 @@ object CpdSupportTest extends TestSuite:
 
   private def reportDir(root: TestRootModule): os.Path = root.moduleDir / "out" / "cpd" / "cpdCheckAll.dest"
 
-  private def value[T](result: Either[ExecResult.Failing[T], UnitTester.Result[T]]): T = result match
-    case Right(r)   => r.value
-    case Left(fail) => throw new java.lang.AssertionError(s"Expected success but got $fail")
-
-  private def failureMessage[T](result: Either[ExecResult.Failing[T], UnitTester.Result[T]]): String = result match
-    case Left(f: ExecResult.Failure[?]) => f.msg
-    case other                          => throw new java.lang.AssertionError(s"Expected a Result.Failure but got $other")
-
   /** The failure message `cpdCheckAll` produces for `build` over the example workspace. */
   private def checkAllFailure(build: CpdRoot): String =
-    UnitTester(build, exampleWorkspace).scoped(eval => failureMessage(eval(build.cpd.cpdCheckAll)))
+    UnitTester(build, exampleWorkspace).scoped(eval => failureOf(eval(build.cpd.cpdCheckAll)))
 
   val tests = Tests:
 
