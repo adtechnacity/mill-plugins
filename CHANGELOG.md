@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.2.0] - 2026-09-15
+
+### Fixed
+
+- **release**: honour custom tagPrefix and the BREAKING CHANGE footer (#25)
+
+### Changed
+
+- **scalafix**: reformat FakeScalafixArguments with scalafmt 3.11.5 (#26)
+
+### Dependencies
+
+- **stryker4s**: stryker4s-core and stryker4s-command-runner 0.21.0 → 1.1.1, forking the renamed `stryker4s-testrunner`
+  (`TestRunnerMain`); mutation results can differ from 0.21.0, and stryker4s 1.x targets Java 17 bytecode (#28)
+- **stryker4s**: fs2-core 3.13.0 → 3.14.0 (#28)
+- **pulumi**: pulumi 1.13.2 → 1.37.0 (#7, #28)
+- **sonar**: sonar-scanner-java-library 4.1.1.1633 → 4.1.2.1663, logback-classic 1.5.38 → 1.6.3 (#7, #28)
+- **scalafix**: scalafix-interfaces 0.14.7 → 0.14.9 (#28)
+- **core,githooks**: org.eclipse.jgit 7.7.1 → 7.8.0 (#28)
+- built against Mill 1.1.9 (was 1.1.6) (#28)
+
+### Other
+
+- share test support across modules, deterministic listModules (#27)
+- **devx**: raise statement coverage to 99% and kill 22 mutants (#20)
+- **core,docs,pulumi**: raise coverage and kill mutants (#24)
+- **scalafix**: add unit tests for scalafix and sonar, join mutation (#23)
+- **stryker4s**: raise statement coverage to 98% and kill 42 mutants (#22)
+- mutate the whole module when a PR changes only its tests (#21)
+- **githooks**: raise statement coverage to 98% and kill 51 mutants (#19)
+- **release**: raise statement coverage to 100% and kill 13 mutants (#18)
+- stryker4s 1.1.1, re-enable MethodExpression and cpd StringLiteral (#17)
+- set next development version 1.1.2-SNAPSHOT
+
 ## [1.1.1] - 2026-09-09
 
 ### Fixed
