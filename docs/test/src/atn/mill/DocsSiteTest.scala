@@ -180,7 +180,7 @@ abstract class SiteDocsRoot extends TestRootModule:
 
   /** The documented module: compilation and classpaths are stubbed so neither a compiler nor a resolver runs. */
   object lib extends ScalaModule:
-    def scalaVersion = "3.8.4"
+    def scalaVersion = "3.9.0"
 
     override def compile           = Task {
       val classes = Task.dest / "classes"

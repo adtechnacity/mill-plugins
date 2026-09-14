@@ -5,11 +5,11 @@ import mill.api.ModuleRef
 import atn.mill._
 
 object a extends ScalaModule {
-  def scalaVersion = "3.8.4"
+  def scalaVersion = "3.9.0"
 }
 
 object b extends ScalaModule {
-  def scalaVersion = "3.8.4"
+  def scalaVersion = "3.9.0"
 }
 
 // One workspace-wide CPD entry point. `cpdRootModule` points back at the build root through a `ModuleRef`, so
