@@ -140,10 +140,10 @@ object stryker4s extends MillPluginModule with MillPluginMutation {
 
   def strykerTestModule = test
 
-  object test    extends MillPluginTests {
+  object test    extends MillPluginTests        {
     // The runner tests fork the real `SbtTestRunnerMain` server, and the fixture suite it runs calls the
     // `stryker4s.coverage` / `stryker4s.activeMutation` runtime instrumented code would: both live in the testrunner.
-    def mvnDeps = Task { super.mvnDeps() ++ Seq(mvn"io.stryker-mutator::stryker4s-sbt-testrunner:0.21.0") }
+    def mvnDeps = Task(super.mvnDeps() ++ Seq(mvn"io.stryker-mutator::stryker4s-sbt-testrunner:0.21.0"))
   }
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(core, stryker4s)
@@ -168,7 +168,7 @@ object stryker4s extends MillPluginModule with MillPluginMutation {
 
 object scalafix extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-scalafix_mill1"
-  def mvnDeps      = Seq(mvn"com.goyeau::mill-scalafix_mill1:0.6.2", mvn"ch.epfl.scala:scalafix-interfaces:0.14.7")
+  def mvnDeps      = Seq(mvn"com.goyeau::mill-scalafix_mill1:0.6.2", mvn"ch.epfl.scala:scalafix-interfaces:0.14.9")
 
   def strykerTestModule = test
 
@@ -217,11 +217,11 @@ object githooks extends MillPluginModule with MillPluginMutation {
 
   def strykerTestModule = test
 
-  object test    extends MillPluginTests {
+  object test    extends MillPluginTests        {
     // GitPrepCommit reads OLLAMA_URL and OLLAMA_MODEL ahead of its constructor arguments. Pin both so the suite is
     // deterministic whatever the developer's shell exports: an empty OLLAMA_URL falls back to the configured
     // ollamaUrl (the tests' fake server), and OLLAMA_MODEL is the name GitPrepCommitTest expects to win.
-    def forkEnv = Task { super.forkEnv() ++ Map("OLLAMA_URL" -> "", "OLLAMA_MODEL" -> "test-model-from-env") }
+    def forkEnv = Task(super.forkEnv() ++ Map("OLLAMA_URL" -> "", "OLLAMA_MODEL" -> "test-model-from-env"))
   }
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(core, githooks)
@@ -311,7 +311,7 @@ object cpd extends MillPluginModule with MillPluginMutation {
 
   def strykerTestModule = test
 
-  object test    extends MillPluginTests {
+  object test    extends MillPluginTests        {
     // The unit tests drive UnitTester over the example workspace.
     def resources = Task.Sources(example.moduleDir / "resources")
   }
