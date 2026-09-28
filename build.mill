@@ -14,7 +14,7 @@ object projectVersion extends VersionFileModule {
 }
 
 trait MillPluginModule extends ScalaModule with PublishModule with Mima with ScoverageModule {
-  def scalaVersion         = "3.8.4"
+  def scalaVersion         = "3.9.0"
   def scoverageVersion     = "2.5.2"
   def publishVersion       = projectVersion.currentVersion().toString
   def mimaPreviousVersions = Seq("0.3.0")
@@ -106,7 +106,7 @@ trait MillPluginMutation extends Stryker4sModule {
 
 /** Aggregated coverage over every plugin module: `./mill scoverage.htmlReportAll` / `scoverage.xmlReportAll`. */
 object scoverage extends ScoverageReport {
-  def scalaVersion     = "3.8.4"
+  def scalaVersion     = "3.9.0"
   def scoverageVersion = "2.5.2"
 }
 
