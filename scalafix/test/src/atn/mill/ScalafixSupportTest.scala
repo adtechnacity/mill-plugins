@@ -27,7 +27,7 @@ object ScalafixSupportTest extends TestSuite:
 
   /** Inputs of a lint of two sources with the workspace config and `--check`. */
   private val inputs = ScalafixSupport.ModuleInputs(
-    scalaVersion = "3.8.4",
+    scalaVersion = "3.9.0",
     scalacOptions = Seq("-Wunused:all"),
     sources = Seq(workspace / "app" / "src" / "A.scala", workspace / "app" / "src" / "B.scala"),
     classpath = Seq(workspace / "out" / "app" / "compile.dest" / "classes", workspace / "lib" / "scala3-library.jar"),
@@ -36,7 +36,7 @@ object ScalafixSupportTest extends TestSuite:
     workingDirectory = workspace
   )
 
-  private val emptyKey: ScalafixSupport.ToolClasspathKey = ("3.8.4", Seq.empty, Seq.empty, Seq.empty)
+  private val emptyKey: ScalafixSupport.ToolClasspathKey = ("3.9.0", Seq.empty, Seq.empty, Seq.empty)
 
   /** What [[ScalafixSupport.describeError]] says for each error, with `validation` as the command-line check. */
   private def descriptions(validation: Option[ScalafixException]): Map[ScalafixError, String] = Map(
@@ -76,7 +76,7 @@ object ScalafixSupportTest extends TestSuite:
       assert(fake.workingDirectory == Some(workspace.toNIO))
       assert(fake.config == Some((workspace / ".scalafix.conf").toNIO))
       assert(fake.classpath == inputs.classpath.map(_.toNIO))
-      assert(fake.scalaVersion == Some("3.8.4"))
+      assert(fake.scalaVersion == Some("3.9.0"))
       assert(fake.scalacOptions == Seq("-Wunused:all"))
       assert(fake.paths == inputs.sources.map(_.toNIO))
       assert(assembled(FakeScalafixArguments(), inputs.copy(config = None)).config == None)
@@ -113,7 +113,7 @@ object ScalafixSupportTest extends TestSuite:
     }
 
     test("cachedArguments - the fetch runs once per key; an equal key gets the same instance without fetching") {
-      val key    = emptyKey.copy(_1 = "3.8.4-cached")
+      val key    = emptyKey.copy(_1 = "3.9.0-cached")
       val first  = ScalafixSupport.cachedArguments(key)(FakeScalafixArguments(rules = 1))
       val second = ScalafixSupport.cachedArguments(key.copy(_4 = Seq.empty)) {
         throw new java.lang.AssertionError("fetched twice for one key")
@@ -123,7 +123,7 @@ object ScalafixSupportTest extends TestSuite:
     }
 
     test("cachedArguments - the Scala version, repositories, rule deps and tool classpath each make a new key") {
-      val base   = emptyKey.copy(_1 = "3.8.4-keyed")
+      val base   = emptyKey.copy(_1 = "3.9.0-keyed")
       val keys   = Seq(
         base,
         base.copy(_1 = "3.8.3-keyed"),
@@ -154,7 +154,7 @@ object ScalafixSupportTest extends TestSuite:
         assert(rule.size > 1)
         val entries   = new ZipFile(classpath.head.path.toIO).entries().asScala.map(_.getName).toSet
         assert(entries.contains("NoTodo.class"))
-        assert(classpath.exists(_.path.last == "scala-library-3.8.4.jar"))
+        assert(classpath.exists(_.path.last == "scala-library-3.9.0.jar"))
       }
     }
 
@@ -174,20 +174,20 @@ object ScalafixSupportTest extends TestSuite:
 // directory.
 abstract class ScalafixRoot extends TestRootModule:
   object plain extends ScalaModule with ScalafixSupport:
-    def scalaVersion = "3.8.4"
+    def scalaVersion = "3.9.0"
 
   object app extends ScalaModule with ScalafixSupport:
-    def scalaVersion             = "3.8.4"
+    def scalaVersion             = "3.9.0"
     override def scalafixMvnDeps = Task(Seq(mvn"org.example::no-such-rules:0.0.0"))
 
   object rule extends ScalaModule:
-    def scalaVersion = "3.8.4"
+    def scalaVersion = "3.9.0"
 
   object rule2 extends ScalaModule:
-    def scalaVersion = "3.8.4"
+    def scalaVersion = "3.9.0"
 
   object tooled extends ScalaModule with ScalafixSupport:
-    def scalaVersion                 = "3.8.4"
+    def scalaVersion                 = "3.9.0"
     override def scalafixToolModules = Seq(rule, rule2)
 
 class ScalafixBuild extends ScalafixRoot:

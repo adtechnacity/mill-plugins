@@ -83,7 +83,7 @@ object StrykerModuleTest extends TestSuite:
       // `scala3-compiler_3:2.13.16` does not exist, and resolving scala-compiler but invoking dotty.tools.dotc.Main
       // fails with "Could not find or load main class": the three must agree, or the run aborts before instrumenting.
       val cases = Seq(
-        "3.8.4"   -> ("scala3-compiler_3", "dotty.tools.dotc.Main", "3"),
+        "3.9.0"   -> ("scala3-compiler_3", "dotty.tools.dotc.Main", "3"),
         "3.3.7"   -> ("scala3-compiler_3", "dotty.tools.dotc.Main", "3"),
         "2.13.16" -> ("scala-compiler", "scala.tools.nsc.Main", "2.13"),
         "2.12.20" -> ("scala-compiler", "scala.tools.nsc.Main", "2.12")
