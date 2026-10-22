@@ -164,9 +164,9 @@ abstract class CpdRoot extends TestRootModule:
   /** The configuration under test; each fixture nests its own `object cpd`. */
   def cpd: CpdSupport
   object a extends ScalaModule:
-    def scalaVersion = "3.8.4"
+    def scalaVersion = "3.9.0"
   object b extends ScalaModule:
-    def scalaVersion = "3.8.4"
+    def scalaVersion = "3.9.0"
 
 class DefaultBuild extends CpdRoot:
   object cpd extends CpdSupport:

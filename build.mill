@@ -14,7 +14,7 @@ object projectVersion extends VersionFileModule {
 }
 
 trait MillPluginModule extends ScalaModule with PublishModule with Mima with ScoverageModule {
-  def scalaVersion         = "3.8.4"
+  def scalaVersion         = "3.9.0"
   def scoverageVersion     = "2.5.2"
   def publishVersion       = projectVersion.currentVersion().toString
   def mimaPreviousVersions = Seq("0.3.0")
@@ -106,7 +106,7 @@ trait MillPluginMutation extends Stryker4sModule {
 
 /** Aggregated coverage over every plugin module: `./mill scoverage.htmlReportAll` / `scoverage.xmlReportAll`. */
 object scoverage extends ScoverageReport {
-  def scalaVersion     = "3.8.4"
+  def scalaVersion     = "3.9.0"
   def scoverageVersion = "2.5.2"
 }
 
@@ -232,8 +232,8 @@ object sonar extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-sonar_mill1"
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
-    mvn"org.sonarsource.scanner.lib:sonar-scanner-java-library:4.1.2.1663",
-    mvn"ch.qos.logback:logback-classic:1.6.3",
+    mvn"org.sonarsource.scanner.lib:sonar-scanner-java-library:4.2.1.1698",
+    mvn"ch.qos.logback:logback-classic:1.6.5",
     mvn"org.typelevel::cats-core:2.13.0"
   )
 
@@ -259,7 +259,7 @@ object release extends MillPluginModule with MillPluginMutation {
 
 object pulumi extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-pulumi_mill1"
-  def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.37.0")
+  def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.37.7")
 
   // First released in 0.8.0, so that is the baseline rather than the repo-wide 0.3.0.
   override def mimaPreviousVersions = Seq("0.8.0")

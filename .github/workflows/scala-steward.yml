@@ -13,7 +13,7 @@ jobs:
       pull-requests: write
       actions: write  # dispatch CI on the update branch
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
