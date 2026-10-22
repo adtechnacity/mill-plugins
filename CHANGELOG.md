@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.0] - 2026-10-22
+
+### Changed
+
+- built against Mill 1.3.1 (was 1.1.9) and Scala 3.9.0 (was 3.8.4); consumers need Mill 1.3 or newer (#31)
+
+### Dependencies
+
+- **pulumi**: pulumi 1.37.0 → 1.37.7 (#31)
+- **sonar**: sonar-scanner-java-library 4.1.2.1663 → 4.2.1.1698, logback-classic 1.6.3 → 1.6.5 (#31)
+
+### Other
+
+- hand release notes to gh as a file, not interpolated into the script (#29)
+- GitHub Actions: checkout v7, setup-java v6, cache v6, upload-artifact v7 (#31)
+- meta-build: dogfood mill-release, mill-stryker4s and mill-cpd 1.2.0, mill-mima 0.2.2 (#31)
+
 ## [1.2.0] - 2026-09-15
 
 ### Fixed
