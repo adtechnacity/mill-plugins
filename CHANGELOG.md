@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.4.0] - 2026-10-23
+
+### Added
+
+- **githooks**: conditional commit signing. Changes that add suppression markers, remove or modify existing test
+  cases or their shared scaffolding, or touch protected paths (the trust store, tool configs) require an OpenPGP
+  signature from a key in `trustedKeysDir` (default `.mill-signing/trusted-keys`). New `git.checkSigning`
+  (pre-commit intent check) and `git.verifyRange` (pre-push, lenient; CI, strict) commands, hook wiring that activates
+  only once the trust store holds a key, pluggable `signingConditions`, a standalone `atn.mill.VerifyMain` for
+  self-hosted pre-receive hooks, and a reference `pull_request_target` CI workflow. See `githooks/docs/signing.md` (#8)
+
+### Dependencies
+
+- **githooks**: adds org.eclipse.jgit.gpg.bc 7.8.0 (BouncyCastle OpenPGP) and an explicit os-lib runtime dependency
+  at the version Mill bundles (#8)
+
+### Other
+
+- meta-build: dogfood mill-release, mill-stryker4s and mill-cpd 1.3.0 (#32)
+
 ## [1.3.0] - 2026-10-22
 
 ### Changed
