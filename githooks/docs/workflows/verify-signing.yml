@@ -8,8 +8,11 @@ name: Verify commit signing
 # not in YAML).
 #
 # Trusted-checkout posture: every step in this job runs against code checked out from the
-# ref the workflow itself is running on (the default branch for `pull_request` events, or
-# whatever ref the dispatch was made from for `workflow_dispatch`) — never from the PR. The
+# ref the workflow itself is running on — the base branch for `pull_request_target` events,
+# and the default branch for `workflow_dispatch` (any other dispatch ref fails) — never from
+# the PR. The trigger must be `pull_request_target`, not `pull_request`: under `pull_request`
+# both this workflow file and the default checkout come from the PR's merge commit, so a PR
+# could add its own key to the trust store and pass its own check. The
 # PR under review is pulled in ONLY as raw git history (commits/trees/blobs, via a plain
 # `git fetch`) for `git.verifyRange` to walk. Its working tree, its `build.mill`, and its own
 # copy of this very file are never checked out or executed. That is what makes the trust
@@ -21,13 +24,15 @@ name: Verify commit signing
 # spelled out in ../signing.md under "Required branch protection" and "Release-flow interaction".
 
 on:
-  pull_request:
+  # Safe only because no step checks out or executes the PR's code: it is fetched as raw git
+  # objects for git.verifyRange to walk, nothing more.
+  pull_request_target:
     types: [opened, synchronize, reopened]
     # Deliberately no `paths:` filter: a PR editing the trust store or a protected tool
     # config is exactly the case this check exists to catch. Narrowing the trigger here
     # would be a bypass.
   workflow_dispatch:
-    # Entry point for PRs that never fire `pull_request` at all — e.g. this repo's own Scala
+    # Entry point for PRs that never fire `pull_request_target` at all — e.g. this repo's own Scala
     # Steward workflow (.github/workflows/scala-steward.yml) authors PRs with GITHUB_TOKEN,
     # and GITHUB_TOKEN-authored pushes/PRs never trigger event-based workflows. Takes a PR
     # number and resolves its base/head SHAs via the GitHub API from INSIDE this trusted
@@ -48,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the trusted (workflow-ref) code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # No `ref:` override: checkout defaults to the ref this workflow itself is running
           # on. That default is the load-bearing property of this job — it is what keeps
@@ -56,20 +61,20 @@ jobs:
           # editing its own judge.
           fetch-depth: 0 # full history: the old..new walk and merge-base check both need it
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: corretto
           java-version: 21
 
       - name: Cache Coursier
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/coursier
           key: ${{ runner.os }}-coursier-${{ hashFiles('build.mill', 'mill-build/build.mill', '**/build.mill') }}
           restore-keys: ${{ runner.os }}-coursier-
 
       - name: Cache Mill
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/mill
           key: ${{ runner.os }}-mill-${{ hashFiles('.mill-version') }}
@@ -80,6 +85,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -87,6 +93,12 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # A dispatch runs this file as it exists on the dispatched ref: only the default
+            # branch's copy is trusted to judge.
+            if [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+              echo "::error::dispatch from $GITHUB_REF refused; dispatch from refs/heads/$DEFAULT_BRANCH"
+              exit 1
+            fi
             # Never trust a dispatch-supplied SHA — only the PR number is caller input; the
             # actual SHAs are looked up here, inside the trusted workflow, via the API.
             pr_number="$DISPATCH_PR_NUMBER"

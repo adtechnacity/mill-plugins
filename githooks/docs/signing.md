@@ -10,7 +10,7 @@ with no trusted keys configured behaves exactly as it did before this feature ex
 Trusted signers' armored public keys live in `trustedKeysDir` (default
 `.mill-signing/trusted-keys`, overridable as a `def` on your `GitHooksModule`). There is no
 separate on/off switch — **enforcement activates the moment that directory holds at least
-one key file**, and `./mill git.install` only emits the signing lines into your hooks once
+one key file** (`*.asc` or `*.gpg`; anything else there, such as a README, is ignored), and `./mill git.install` only emits the signing lines into your hooks once
 that's true. A default install with an empty or missing keys dir is byte-identical to a
 repo that never adopted this feature.
 
@@ -46,11 +46,16 @@ Three built-in conditions, all overridable:
 - **Exception/suppression markers** (`exceptionCommentMarkers`) — fires when an *added* line
   matches a suppression pattern. Defaults: scalafmt `format: off`, scalafix
   `scalafix:off`/`scalafix:ok`, scalastyle `scalastyle:off`, `NOSONAR`, CodeScene disable
-  directives, `@nowarn`, `@SuppressWarnings`. Removing a marker, or working near an existing
+  directives, `@nowarn`, `@SuppressWarnings`, scoverage `$COVERAGE-OFF$`, and `-Wconf`
+  compiler options (typically in a build file). Removing a marker, or working near an existing
   one, never fires.
 
 - **Test-case protection** (`testCasePatterns`) — fires when an existing test case is removed
-  or modified, resolved case-by-case against the file's *old* path and *old* content. **Pure
+  or modified, resolved case-by-case against the file's *old* path and *old* content. The
+  shared scaffolding before a file's first case (helpers, fixtures, or a whole case-less
+  test-support file) counts as one more protected region; removing only imports, comments,
+  blank lines or bare braces there does not fire. Test roots are `test/`, `tests/` and
+  hyphenated directories such as `test-support/`, `example-tests/` or `integration-test/`. **Pure
   insertions never fire — this is a known v1 evasion vector, not a safety guarantee.** An
   inserted `assume(false)` or an early return can neuter an existing test without removing a
   single line, and this feature will not catch it. Treat it as a prompt for human review, not
@@ -80,6 +85,12 @@ Signing is checked at three points, with different strictness:
    or misconfigured trust store is a hard failure. This — or eventually a server-side
    pre-receive hook — is the actual enforcement layer.
 
+A signature counts as trusted only when it is made over a SHA-2 or SHA-3 digest by a key in
+the trust store that is neither revoked nor expired. A subkey is revoked when its master key
+is, and expires when its master key does. The key must be valid both at the time the
+signature claims and at verification time: the signer chooses the signature's timestamp, so
+checking it alone would let an expired key backdate its way back into its validity window.
+
 ## Remedies
 
 The rejection message names which of these applies:
@@ -90,6 +101,7 @@ The rejection message names which of these applies:
 | Unsigned (pushed a protected commit with no signature) | Sign it (`git commit --amend -S` / interactive rebase with `-S`) and re-push |
 | Key not in trust root | See **untrusted-contributor workflow** below |
 | Revoked / expired key | Re-sign with a current trusted key |
+| Weak hash algorithm (SHA-1 or older) | Re-sign with a SHA-2 digest (`personal-digest-preferences SHA512` in `gpg.conf`) |
 | Unverifiable format (SSH-signed) | v1 supports OpenPGP only — see **GPG-only scope** below |
 
 ### Untrusted-contributor workflow
@@ -148,7 +160,9 @@ implementation ships at
 The workflow runs `./mill git.verifyRange <base-sha> <head-sha>` in **strict** mode (no
 `--lenient`) against every commit in a pull request. The one property everything else in the
 file exists to protect: **it always executes code checked out from its own ref** — the
-default branch for a normal `pull_request` trigger — never from the PR being judged. The PR
+base branch, which is why it triggers on `pull_request_target` and not `pull_request` (under
+`pull_request` both the workflow file and the checkout come from the PR's merge commit, so a
+PR could trust its own key) — never from the PR being judged. The PR
 itself is pulled in only as raw git history (a plain `git fetch` of its head ref, no working
 tree checkout) so `verifyRange` has commits to walk. This means a PR cannot smuggle in a
 weakened `signingConditions` override, a modified verifier, or a mutated trust store and have
@@ -163,10 +177,12 @@ rather than silently passing.
 ### Bot PRs (`workflow_dispatch`)
 
 PRs authored with `GITHUB_TOKEN` — this repo's own Scala Steward workflow is one — never fire
-`pull_request` events, so a required `verify-signing` check would simply never run and such
+`pull_request_target` events, so a required `verify-signing` check would simply never run and such
 PRs would become permanently unmergeable. The reference workflow adds a `workflow_dispatch`
 input taking a PR number; the actual base/head SHAs are then resolved via the GitHub API
-*inside the trusted workflow*, not accepted from the dispatch caller, keeping the
+*inside the trusted workflow*, not accepted from the dispatch caller, and a dispatch from any ref
+other than the default branch is refused (a dispatch runs the workflow file as it exists on
+the dispatched ref), keeping the
 trusted-SHA-only invariant intact for this entry point too. Wiring the dispatch call itself
 (e.g. from the Steward workflow, mirroring how `scala-steward.yml` already dispatches
 `ci.yml`) is part of adopting this workflow, not something the reference file does on its
