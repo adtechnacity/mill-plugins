@@ -97,7 +97,7 @@ trait GitHooksModule extends DefaultTaskModule {
     Task.Command(exclusive = true)[WorkDone] {
       val ev            = EvaluatorProxy(() => evaluator)
       val keysDir       = resolvedTrustedKeysDir(ev.rootModule.moduleDir)
-      val signingActive = os.exists(keysDir) && os.isDir(keysDir) && os.list(keysDir).exists(os.isFile)
+      val signingActive = TrustedKeys.hasKeyFiles(keysDir)
       new GitInstall(
         ev.rootModule.moduleDir / ".git/hooks",
         ev.baseLogger,

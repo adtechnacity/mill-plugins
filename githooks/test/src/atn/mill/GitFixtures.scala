@@ -121,16 +121,19 @@ object GitFixtures {
    * A public key ring for `master`, self-certified for `userId`, optionally carrying one signing subkey. `expireAfter`
    * (seconds; `None` = never expires) applies to whichever key (`master`, or the subkey when present) will do the
    * signing, matching real `gpg --quick-generate-key --expire-date` semantics closely enough for verification tests.
+   * `masterExpireAfter` expires the master key itself, independently of a subkey's own window.
    */
   def keyRing(
     master: PGPKeyPair,
     userId: String = "Test Signer <signer@example.com>",
     subkey: Option[PGPKeyPair] = None,
-    expireAfter: Option[Long] = None
+    expireAfter: Option[Long] = None,
+    masterExpireAfter: Option[Long] = None
   ): PGPPublicKeyRing = {
     val sha1Calc   = new JcaPGPDigestCalculatorProviderBuilder().build().get(HashAlgorithmTags.SHA1)
     val masterSubs = new PGPSignatureSubpacketGenerator()
     if (subkey.isEmpty) expireAfter.foreach(s => masterSubs.setKeyExpirationTime(false, s))
+    masterExpireAfter.foreach(s => masterSubs.setKeyExpirationTime(false, s))
     val sigBuilder = new JcaPGPContentSignerBuilder(master.getPublicKey.getAlgorithm, HashAlgorithmTags.SHA256)
     val gen        = new PGPKeyRingGenerator(
       PGPSignature.POSITIVE_CERTIFICATION,
@@ -172,9 +175,14 @@ object GitFixtures {
     out.toString("US-ASCII")
   }
 
-  private def detachedSignature(payload: Array[Byte], signer: PGPKeyPair, signatureTime: Date): PGPSignature = {
+  private def detachedSignature(
+    payload: Array[Byte],
+    signer: PGPKeyPair,
+    signatureTime: Date,
+    hashAlgorithm: Int = HashAlgorithmTags.SHA256
+  ): PGPSignature = {
     val sigGen = new PGPSignatureGenerator(
-      new JcaPGPContentSignerBuilder(signer.getPublicKey.getAlgorithm, HashAlgorithmTags.SHA256)
+      new JcaPGPContentSignerBuilder(signer.getPublicKey.getAlgorithm, hashAlgorithm)
     )
     sigGen.init(PGPSignature.BINARY_DOCUMENT, signer.getPrivateKey)
     val subs   = new PGPSignatureSubpacketGenerator()
@@ -195,7 +203,8 @@ object GitFixtures {
   /**
    * A commit like [[rawCommit]], carrying a detached OpenPGP signature over its pre-signature bytes signed by `signer`,
    * so the result round-trips through `RevCommit.getRawGpgSignature()` like a real `git commit -S`. `signatureTime`
-   * lets tests place the signature outside a short-lived key's validity window.
+   * lets tests place the signature outside a short-lived key's validity window; `hashAlgorithm` lets them sign with a
+   * digest the verifier must refuse.
    */
   def signedCommit(
     git: Git,
@@ -203,9 +212,10 @@ object GitFixtures {
     parents: Seq[ObjectId],
     msg: String,
     signer: PGPKeyPair,
-    signatureTime: Date = new Date()
+    signatureTime: Date = new Date(),
+    hashAlgorithm: Int = HashAlgorithmTags.SHA256
   ): ObjectId =
-    insertCommit(git, files, parents, msg, p => Seq(detachedSignature(p, signer, signatureTime)))
+    insertCommit(git, files, parents, msg, p => Seq(detachedSignature(p, signer, signatureTime, hashAlgorithm)))
 
   /** A commit whose `gpgsig` header carries two independent signature packets in one armored blob. */
   def multiSignedCommit(

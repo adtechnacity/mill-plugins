@@ -1,5 +1,6 @@
 package atn.mill
 
+import org.bouncycastle.bcpg.HashAlgorithmTags
 import org.bouncycastle.openpgp._
 import org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory
 import org.bouncycastle.openpgp.operator.jcajce.{JcaKeyFingerprintCalculator, JcaPGPContentVerifierBuilderProvider}
@@ -11,6 +12,7 @@ import org.eclipse.jgit.treewalk.filter.PathFilter
 
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
+import java.time.Instant
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -33,7 +35,7 @@ sealed trait SigningVerdict {
     case SigningVerdict.Untrusted(fp)     =>
       Some(s"$sha: signed by an untrusted key ($fp) — a maintainer must re-sign or add this key to the trust root")
     case SigningVerdict.Revoked(fp)       => Some(s"$sha: signed by a revoked key ($fp)")
-    case SigningVerdict.Expired(fp)       => Some(s"$sha: signed by a key expired at signing time ($fp)")
+    case SigningVerdict.Expired(fp)       => Some(s"$sha: signed by an expired key ($fp)")
   }
 }
 
@@ -48,10 +50,10 @@ object SigningVerdict {
 }
 
 /**
- * One key loaded from a trust source: its full 40-hex fingerprint and whether it (or, for a subkey, its binding)
- * carries a valid revocation.
+ * One key loaded from a trust source: the key, its ring's master key (the key itself for a master), its full 40-hex
+ * fingerprint, and whether it is revoked — directly, through its subkey binding, or because its master key is.
  */
-final private case class LoadedKey(publicKey: PGPPublicKey, fingerprint: String, revoked: Boolean)
+final private case class LoadedKey(publicKey: PGPPublicKey, master: PGPPublicKey, fingerprint: String, revoked: Boolean)
 
 /**
  * Armored public keys loaded from a worktree directory or a git ref's tree, indexed by OpenPGP key ID for signature
@@ -67,23 +69,30 @@ final class TrustedKeys private (private val byKeyId: Map[Long, Vector[LoadedKey
 object TrustedKeys {
 
   /**
-   * GitHub's published web-flow signing key, identified by its 16-hex long key ID (the fingerprint GitHub publishes).
-   * Best-effort refusal check only — never used for trust matching, which is always full-fingerprint.
+   * GitHub's web-flow signing keys, current (since January 2024) and the one it replaced — history signed by the old
+   * key is still pushed around — identified by their 16-hex long key IDs. Best-effort refusal check only — never used
+   * for trust matching, which is always full-fingerprint.
    */
-  val KnownPlatformKeyIds: Set[String] = Set("B5690EEEBB952194")
+  val KnownPlatformKeyIds: Set[String] = Set("B5690EEEBB952194", "4AEE18F83AFDEB23")
 
-  /** Load every regular file in `dir` as an armored key source. */
+  /** Key files are recognised by extension, so a README or other note can sit beside the keys. */
+  private[mill] def isKeyFile(name: String): Boolean = name.endsWith(".asc") || name.endsWith(".gpg")
+
+  /** Whether `dir` holds at least one key file: what activates signing enforcement in the installed hooks. */
+  def hasKeyFiles(dir: os.Path): Boolean = os.isDir(dir) && os.list(dir).exists(f => os.isFile(f) && isKeyFile(f.last))
+
+  /** Load every `*.asc`/`*.gpg` file in `dir` as an armored key source. */
   def fromDirectory(dir: os.Path): Either[String, TrustedKeys] =
     if (!os.exists(dir) || !os.isDir(dir)) Left(s"trusted-keys configuration error: directory not found: $dir")
     else {
-      val files = os.list(dir).filter(os.isFile)
-      if (files.isEmpty) Left(s"trusted-keys configuration error: no key files found in $dir")
+      val files = os.list(dir).filter(f => os.isFile(f) && isKeyFile(f.last))
+      if (files.isEmpty) Left(s"trusted-keys configuration error: no key files (*.asc, *.gpg) found in $dir")
       else parseAndBuild(files.map(f => f.last -> os.read.bytes(f)))
     }
 
   /**
-   * Load every blob under `path` in `refName`'s tree as an armored key source — never the working tree or an untrusted
-   * ref.
+   * Load every `*.asc`/`*.gpg` blob under `path` in `refName`'s tree as an armored key source — never the working tree
+   * or an untrusted ref.
    */
   def fromRef(repo: Repository, refName: String, path: String): Either[String, TrustedKeys] =
     Option(repo.resolve(s"$refName^{tree}")) match {
@@ -99,6 +108,7 @@ object TrustedKeys {
             val files = Iterator
               .continually(walk.next())
               .takeWhile(identity)
+              .filter(_ => isKeyFile(walk.getNameString))
               .map(_ => walk.getPathString -> reader.open(walk.getObjectId(0)).getBytes)
               .toVector
             if (files.isEmpty) Left(s"trusted-keys configuration error: no key files found at $refName:$path")
@@ -141,9 +151,10 @@ object TrustedKeys {
       )
     else {
       val loaded = rings.flatMap { ring =>
-        val master = ring.getPublicKey
+        val master        = ring.getPublicKey
+        val masterRevoked = isRevoked(master, master)
         ring.getPublicKeys.asScala.toVector.map { key =>
-          LoadedKey(key, fingerprintHex(key), revoked = isRevoked(key, master))
+          LoadedKey(key, master, fingerprintHex(key), revoked = masterRevoked || isRevoked(key, master))
         }
       }
       Right(new TrustedKeys(loaded.groupBy(_.publicKey.getKeyID)))
@@ -175,15 +186,29 @@ object TrustedKeys {
  */
 object SigningVerify {
 
-  /** Verify `commit`'s signature (if any) against `trusted`. */
-  def verify(commit: RevCommit, trusted: TrustedKeys): SigningVerdict =
+  /** Digests a signature may be made over; SHA-1 and older are collision-prone and refused. */
+  private val StrongHashes: Set[Int] = Set(
+    HashAlgorithmTags.SHA224,
+    HashAlgorithmTags.SHA256,
+    HashAlgorithmTags.SHA384,
+    HashAlgorithmTags.SHA512,
+    HashAlgorithmTags.SHA3_256,
+    HashAlgorithmTags.SHA3_512
+  )
+
+  /**
+   * Verify `commit`'s signature (if any) against `trusted`. The signing key must be valid both when the signature says
+   * it was made and at `now`: the signer picks the signature's timestamp, so the signing-time check alone would let an
+   * expired key backdate its way back into its validity window.
+   */
+  def verify(commit: RevCommit, trusted: TrustedKeys, now: Instant = Instant.now()): SigningVerdict =
     Option(commit.getRawGpgSignature) match {
       case None           => SigningVerdict.Unsigned
       case Some(sigBytes) =>
         val text = new String(sigBytes, StandardCharsets.US_ASCII)
         if (!text.stripLeading().startsWith("-----BEGIN PGP SIGNATURE-----"))
           SigningVerdict.Unverifiable(armorFormat(text))
-        else verifyPgp(commit, sigBytes, trusted)
+        else verifyPgp(commit, sigBytes, trusted, now)
     }
 
   private def armorFormat(text: String): String =
@@ -192,7 +217,7 @@ object SigningVerify {
       .map(_.stripPrefix("-----BEGIN ").stripSuffix("-----").trim)
       .getOrElse("unknown")
 
-  private def verifyPgp(commit: RevCommit, sigBytes: Array[Byte], trusted: TrustedKeys): SigningVerdict =
+  private def verifyPgp(commit: RevCommit, sigBytes: Array[Byte], trusted: TrustedKeys, now: Instant): SigningVerdict =
     Try {
       val in = PGPUtil.getDecoderStream(new ByteArrayInputStream(sigBytes))
       new JcaPGPObjectFactory(in).nextObject() match {
@@ -203,19 +228,21 @@ object SigningVerify {
           )
       }
     } match {
-      case scala.util.Failure(e)                      => SigningVerdict.Invalid(s"malformed signature: ${e.getMessage}")
-      case scala.util.Success(sigs) if sigs.size != 1 => SigningVerdict.Invalid("multi-signature")
-      case scala.util.Success(sigs)                   =>
+      case scala.util.Failure(e)                                                  => SigningVerdict.Invalid(s"malformed signature: ${e.getMessage}")
+      case scala.util.Success(sigs) if sigs.size != 1                             => SigningVerdict.Invalid("multi-signature")
+      case scala.util.Success(Vector(sig)) if !StrongHashes(sig.getHashAlgorithm) =>
+        SigningVerdict.Invalid(s"weak hash algorithm ${digestName(sig.getHashAlgorithm)}")
+      case scala.util.Success(sigs)                                               =>
         val sig        = sigs.head
         val payload    = stripGpgSigHeader(commit.getRawBuffer)
         val candidates = trusted.candidates(sig.getKeyID)
         if (candidates.isEmpty) SigningVerdict.Untrusted(f"${sig.getKeyID}%016X")
         else
           candidates.find(c => cryptoVerify(sig, c.publicKey, payload)) match {
-            case None                                   => SigningVerdict.Invalid("signature-mismatch")
-            case Some(c) if c.revoked                   => SigningVerdict.Revoked(c.fingerprint)
-            case Some(c) if isExpired(c.publicKey, sig) => SigningVerdict.Expired(c.fingerprint)
-            case Some(c)                                => SigningVerdict.Trusted(c.fingerprint)
+            case None                              => SigningVerdict.Invalid("signature-mismatch")
+            case Some(c) if c.revoked              => SigningVerdict.Revoked(c.fingerprint)
+            case Some(c) if isExpired(c, sig, now) => SigningVerdict.Expired(c.fingerprint)
+            case Some(c)                           => SigningVerdict.Trusted(c.fingerprint)
           }
     }
 
@@ -226,26 +253,35 @@ object SigningVerify {
       sig.verify()
     }.getOrElse(false)
 
-  private def isExpired(key: PGPPublicKey, sig: PGPSignature): Boolean = {
-    val sigTime      = sig.getCreationTime.toInstant
-    val keyCreated   = key.getCreationTime.toInstant
-    val validSeconds = key.getValidSeconds
-    sigTime.isBefore(keyCreated) || (validSeconds > 0 && sigTime.isAfter(keyCreated.plusSeconds(validSeconds)))
+  private def digestName(algorithm: Int): String = Try(PGPUtil.getDigestName(algorithm)).getOrElse(s"#$algorithm")
+
+  /** A subkey is only as valid as its master key, so both validity windows apply. */
+  private def isExpired(key: LoadedKey, sig: PGPSignature, now: Instant): Boolean = {
+    val sigTime = sig.getCreationTime.toInstant
+    Seq(key.publicKey, key.master).distinct.exists { k =>
+      val created      = k.getCreationTime.toInstant
+      val validSeconds = k.getValidSeconds
+      val expired      = (t: Instant) => validSeconds > 0 && t.isAfter(created.plusSeconds(validSeconds))
+      sigTime.isBefore(created) || expired(sigTime) || expired(now)
+    }
   }
 
   /**
    * Reconstruct the bytes that were fed to the signer: the raw commit object with the `gpgsig` header line and its
    * space-indented continuation lines removed. This inverts whatever wrapping `CommitBuilder.build()` applied when the
-   * signature was attached, so it holds regardless of the exact header-wrap format used.
+   * signature was attached, so it holds regardless of the exact header-wrap format used. Only the header is searched:
+   * after the blank line that ends it, a message line reading `gpgsig ...` is signed content like any other.
    */
   private[mill] def stripGpgSigHeader(raw: Array[Byte]): Array[Byte] = {
     val iso       = StandardCharsets.ISO_8859_1
+    val text      = new String(raw, iso)
+    val headerEnd = Option(text.indexOf("\n\n")).filter(_ >= 0).map(_ + 1).getOrElse(text.length)
     // Split keeps each line's trailing newline, so the kept lines reconstruct the original bytes exactly.
-    val lines     = new String(raw, iso).split("(?<=\n)").toVector
+    val lines     = text.take(headerEnd).split("(?<=\n)").toVector
     val (kept, _) = lines.foldLeft((Vector.empty[String], false)) { case ((kept, inSig), line) =>
       if ((!inSig && line.startsWith("gpgsig ")) || (inSig && line.startsWith(" "))) (kept, true)
       else (kept :+ line, false)
     }
-    kept.mkString.getBytes(iso)
+    (kept.mkString + text.drop(headerEnd)).getBytes(iso)
   }
 }

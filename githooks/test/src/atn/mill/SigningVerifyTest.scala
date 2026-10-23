@@ -2,6 +2,9 @@ package atn.mill
 
 import utest._
 
+import org.bouncycastle.bcpg.HashAlgorithmTags
+import org.bouncycastle.openpgp.{PGPKeyPair, PGPPublicKeyRing}
+
 import org.eclipse.jgit.revwalk.RevWalk
 
 import java.util.Date
@@ -24,33 +27,36 @@ object SigningVerifyTest extends TestSuite {
     body(dir)
   }
 
-  val tests = Tests {
+  def fingerprint(key: PGPKeyPair): String = TrustedKeys.fingerprintHex(key.getPublicKey)
 
-    test("trusted-signed commit by a master key verifies as Trusted with its fingerprint") {
-      withRepo { (_, git) =>
-        val signer = genKeyPair()
-        val ring   = keyRing(signer)
-        withKeysDir(armorRing(ring)) { dir =>
-          val Right(trusted) = TrustedKeys.fromDirectory(dir): @unchecked
-          val commit         = commitOf(git, signedCommit(git, Map("a.txt" -> "x"), Nil, "signed", signer))
-          SigningVerify.verify(commit, trusted) ==> SigningVerdict.Trusted(
-            TrustedKeys.fingerprintHex(signer.getPublicKey)
-          )
-        }
+  def daysAgo(n: Int): Date = new Date(System.currentTimeMillis() - n.days.toMillis)
+
+  /** The verdict on a one-file commit `signer` signed, checked against a trust store holding only `ring`. */
+  def verdictOf(
+    ring: PGPPublicKeyRing,
+    signer: PGPKeyPair,
+    signatureTime: Date = new Date(),
+    hashAlgorithm: Int = HashAlgorithmTags.SHA256,
+    msg: String = "signed"
+  ): SigningVerdict =
+    withRepo { (_, git) =>
+      withKeysDir(armorRing(ring)) { dir =>
+        val Right(trusted) = TrustedKeys.fromDirectory(dir): @unchecked
+        val signed         = signedCommit(git, Map("a.txt" -> "x"), Nil, msg, signer, signatureTime, hashAlgorithm)
+        SigningVerify.verify(commitOf(git, signed), trusted)
       }
     }
 
+  val tests = Tests {
+
+    test("trusted-signed commit by a master key verifies as Trusted with its fingerprint") {
+      val signer = genKeyPair()
+      verdictOf(keyRing(signer), signer) ==> SigningVerdict.Trusted(fingerprint(signer))
+    }
+
     test("subkey-signed commit verifies as Trusted when the full ring (master + subkey) is present") {
-      withRepo { (_, git) =>
-        val master = genKeyPair()
-        val sub    = genKeyPair()
-        val ring   = keyRing(master, subkey = Some(sub))
-        withKeysDir(armorRing(ring)) { dir =>
-          val Right(trusted) = TrustedKeys.fromDirectory(dir): @unchecked
-          val commit         = commitOf(git, signedCommit(git, Map("a.txt" -> "x"), Nil, "signed", sub))
-          SigningVerify.verify(commit, trusted) ==> SigningVerdict.Trusted(TrustedKeys.fingerprintHex(sub.getPublicKey))
-        }
-      }
+      val sub = genKeyPair()
+      verdictOf(keyRing(genKeyPair(), subkey = Some(sub)), sub) ==> SigningVerdict.Trusted(fingerprint(sub))
     }
 
     test("unsigned commit is Unsigned") {
@@ -72,33 +78,17 @@ object SigningVerifyTest extends TestSuite {
     }
 
     test("a revoked subkey in the ring verifies as Revoked, never Trusted") {
-      withRepo { (_, git) =>
-        val master  = genKeyPair()
-        val sub     = genKeyPair()
-        val bound   = keyRing(master, subkey = Some(sub))
-        val revoked = revoke(bound, master, subkeyId = Some(sub.getKeyID))
-        withKeysDir(armorRing(revoked)) { dir =>
-          val Right(trusted) = TrustedKeys.fromDirectory(dir): @unchecked
-          val commit         = commitOf(git, signedCommit(git, Map("a.txt" -> "x"), Nil, "signed", sub))
-          SigningVerify.verify(commit, trusted) ==> SigningVerdict.Revoked(TrustedKeys.fingerprintHex(sub.getPublicKey))
-        }
-      }
+      val master = genKeyPair()
+      val sub    = genKeyPair()
+      val ring   = revoke(keyRing(master, subkey = Some(sub)), master, subkeyId = Some(sub.getKeyID))
+      verdictOf(ring, sub) ==> SigningVerdict.Revoked(fingerprint(sub))
     }
 
     test("a signature made after the key's validity window is Expired") {
-      withRepo { (_, git) =>
-        val created = new Date(System.currentTimeMillis() - 3.days.toMillis)
-        val signer  = genKeyPair(created)
-        val ring    = keyRing(signer, expireAfter = Some(1.days.toSeconds))
-        withKeysDir(armorRing(ring)) { dir =>
-          val Right(trusted) = TrustedKeys.fromDirectory(dir): @unchecked
-          val commit         =
-            commitOf(git, signedCommit(git, Map("a.txt" -> "x"), Nil, "signed", signer, signatureTime = new Date()))
-          SigningVerify.verify(commit, trusted) ==> SigningVerdict.Expired(
-            TrustedKeys.fingerprintHex(signer.getPublicKey)
-          )
-        }
-      }
+      val signer = genKeyPair(daysAgo(3))
+      verdictOf(keyRing(signer, expireAfter = Some(1.days.toSeconds)), signer) ==> SigningVerdict.Expired(
+        fingerprint(signer)
+      )
     }
 
     test("a signature blob carrying two signature packets is Invalid as multi-signature") {
@@ -167,6 +157,53 @@ object SigningVerifyTest extends TestSuite {
         val Right(after) = TrustedKeys.fromDirectory(dir): @unchecked
         SigningVerify.verify(commit, after) ==> SigningVerdict.Trusted(TrustedKeys.fingerprintHex(signer.getPublicKey))
       }
+    }
+
+    test("a subkey of a revoked master key verifies as Revoked, never Trusted") {
+      val master = genKeyPair()
+      val sub    = genKeyPair()
+      verdictOf(revoke(keyRing(master, subkey = Some(sub)), master), sub) ==> SigningVerdict.Revoked(fingerprint(sub))
+    }
+
+    test("a subkey signature made after its master key expired is Expired") {
+      val sub  = genKeyPair(daysAgo(3))
+      val ring = keyRing(genKeyPair(daysAgo(3)), subkey = Some(sub), masterExpireAfter = Some(1.days.toSeconds))
+      verdictOf(ring, sub) ==> SigningVerdict.Expired(fingerprint(sub))
+    }
+
+    test("a signature backdated into the validity window of a key that has since expired is Expired") {
+      val signer    = genKeyPair(daysAgo(3))
+      val backdated = new Date(System.currentTimeMillis() - 60.hours.toMillis)
+      val ring      = keyRing(signer, expireAfter = Some(1.days.toSeconds))
+      verdictOf(ring, signer, signatureTime = backdated) ==> SigningVerdict.Expired(fingerprint(signer))
+    }
+
+    test("a signature over a SHA-1 digest is Invalid as a weak hash, even from a trusted key") {
+      val signer = genKeyPair()
+      verdictOf(keyRing(signer), signer, hashAlgorithm = HashAlgorithmTags.SHA1) ==>
+        SigningVerdict.Invalid("weak hash algorithm SHA1")
+    }
+
+    test("a message line that looks like a gpgsig header is signed content, not stripped") {
+      val signer = genKeyPair()
+      val msg    = "subject\n\ngpgsig is mentioned here\n indented continuation\n"
+      verdictOf(keyRing(signer), signer, msg = msg) ==> SigningVerdict.Trusted(fingerprint(signer))
+    }
+
+    test("non-key files beside the keys are ignored, and a directory of only non-key files holds no keys") {
+      withKeysDir(armorRing(keyRing(genKeyPair()))) { dir =>
+        os.write(dir / "README.md", "Trusted signers for this repo.\n")
+        assert(TrustedKeys.fromDirectory(dir).isRight)
+        assert(TrustedKeys.hasKeyFiles(dir))
+      }
+      val onlyReadme = os.temp.dir(prefix = "readme-only")
+      os.write(onlyReadme / "README.md", "no keys yet\n")
+      assert(TrustedKeys.fromDirectory(onlyReadme).left.exists(_.contains("no key files")))
+      assert(!TrustedKeys.hasKeyFiles(onlyReadme))
+    }
+
+    test("both of GitHub's web-flow signing keys, current and pre-2024, are known platform keys") {
+      assert(TrustedKeys.KnownPlatformKeyIds == Set("B5690EEEBB952194", "4AEE18F83AFDEB23"))
     }
   }
 }
