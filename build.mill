@@ -213,10 +213,14 @@ object githooks extends MillPluginModule with MillPluginMutation {
     mvn"com.lihaoyi::mainargs:0.7.8",
     // os.Path/os.* is used throughout the Mill-free layer (GitDiff, SigningConditions, SigningVerify,
     // VerifyMain) but isn't itself Mill API — normally it only reaches the classpath via Mill's
-    // provided-scope mill-libs, which VerifyMain's coursier launch never has. Explicit runtime dep,
-    // pinned to the same version Mill itself currently bundles.
-    mvn"com.lihaoyi::os-lib:0.11.8"
+    // provided-scope mill-libs, which VerifyMain's standalone launch never has. Explicit runtime dep,
+    // at the version of the os-lib this build runs on (Mill's own), so a Mill upgrade moves it too.
+    mvn"com.lihaoyi::os-lib:$millOsLibVersion"
   )
+
+  private def millOsLibVersion: String =
+    Option(classOf[os.Path].getPackage.getImplementationVersion)
+      .getOrElse(sys.error("os-lib on Mill's classpath carries no Implementation-Version"))
 
   // GitInstall is an internal helper (only GitHooksModule.install constructs it); the added
   // prePushExtraCommands param is defaulted, so the constructor change is source-compatible.
@@ -234,40 +238,16 @@ object githooks extends MillPluginModule with MillPluginMutation {
   def strykerTestModule = test
 
   object test extends MillPluginTests {
-    // Stages core+githooks as a local file:// Maven repo so VerifyMainTest's coursier smoke test can `cs launch`
-    // the unpublished artifact — same mechanism as MillPluginExampleTests.localM2Repo/forkEnv, scoped to this one
-    // test module rather than the shared trait.
-    def artifacts: T[Seq[(mill.scalalib.publish.Artifact, os.Path, os.Path)]] = Task {
-      Task.traverse(Seq(core, githooks)) { m =>
-        Task.Anon {
-          (m.artifactMetadata(), m.jar().path, m.pom().path)
-        }
-      }()
-    }
-
-    def localM2Repo: T[PathRef] = Task {
-      import java.nio.file.{Files, StandardCopyOption}
-      val repo = Task.dest / "m2repo"
-      for ((art, jar, pom) <- artifacts()) {
-        val base = repo / os.RelPath(art.group.replace('.', '/')) / art.id / art.version
-        os.makeDir.all(base)
-        Files.copy(jar.toNIO, (base / s"${art.id}-${art.version}.jar").toNIO, StandardCopyOption.REPLACE_EXISTING)
-        Files.copy(pom.toNIO, (base / s"${art.id}-${art.version}.pom").toNIO, StandardCopyOption.REPLACE_EXISTING)
-      }
-      PathRef(repo)
-    }
-
     // GitPrepCommit reads OLLAMA_URL and OLLAMA_MODEL ahead of its constructor arguments. Pin both so the suite is
     // deterministic whatever the developer's shell exports: an empty OLLAMA_URL falls back to the configured
     // ollamaUrl (the tests' fake server), and OLLAMA_MODEL is the name GitPrepCommitTest expects to win.
+    // VERIFY_MAIN_CLASSPATH is githooks' runtime classpath — no provided-scope Mill API — for VerifyMainTest's smoke
+    // test, which runs VerifyMain on it the way a server's pre-receive hook does.
     override def forkEnv = Task {
-      val repo     = localM2Repo().path
-      val existing = Task.env.getOrElse("COURSIER_REPOSITORIES", "ivy2Local|central")
       super.forkEnv() ++ Map(
         "OLLAMA_URL"            -> "",
         "OLLAMA_MODEL"          -> "test-model-from-env",
-        "COURSIER_REPOSITORIES" -> s"${repo.toNIO.toUri.toASCIIString}|$existing",
-        "PLUGIN_VERSION"        -> projectVersion.currentVersion().toString
+        "VERIFY_MAIN_CLASSPATH" -> githooks.runClasspath().map(_.path.toString).mkString(java.io.File.pathSeparator)
       )
     }
   }

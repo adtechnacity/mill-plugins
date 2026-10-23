@@ -228,45 +228,28 @@ object VerifyMainTest extends TestSuite {
       VerifyMain.parseUpdates(Iterator("a" * 40 + " " + "b" * 40)).isLeft ==> true
     }
 
-    test("smoke: a coursier launch of the locally-staged artifact reproduces a failing verdict end-to-end") {
-      // A bare `cs` on PATH is not safe to trust here: this machine's PATH resolves it to CodeScene's CLI, not
-      // coursier (the exact collision the plan called out) — resolve coursier's own self-install path explicitly.
-      val coursierBin = Seq(
-        sys.env.get("COURSIER_BIN"),
-        Some((os.home / ".local/share/coursier/bin/cs").toString),
-        Some((os.home / ".local/share/coursier/bin/coursier").toString)
-      ).flatten.find(p => os.exists(os.Path(p)))
+    test("smoke: VerifyMain on its own runtime classpath, no Mill API, reproduces a failing verdict end-to-end") {
+      // The build stages githooks' runtime classpath (core, jgit, BouncyCastle, os-lib, mainargs; never mill-libs, which
+      // is provided scope) — exactly what a server's pre-receive hook gets, so a stray `mill.*` reference fails here.
+      val classpath = sys.env.getOrElse(
+        "VERIFY_MAIN_CLASSPATH",
+        throw new java.lang.AssertionError("VERIFY_MAIN_CLASSPATH is not staged; run this suite through ./mill")
+      )
+      val javaBin   = os.Path(sys.props("java.home")) / "bin" / "java"
+      withRepo { (dir, git) =>
+        val mainTip = trustKey(git, dir, genKeyPair())
+        val pushed  = rawCommit(git, Map("Foo.scala" -> "// NOSONAR\n"), Seq(mainTip), "add suppression")
 
-      (coursierBin, sys.env.get("COURSIER_REPOSITORIES"), sys.env.get("PLUGIN_VERSION")) match {
-        case (Some(cs), Some(repos), Some(version)) =>
-          withRepo { (dir, git) =>
-            val signer  = genKeyPair()
-            val mainTip = trustKey(git, dir, signer)
-            val pushed  = rawCommit(git, Map("Foo.scala" -> "// NOSONAR\n"), Seq(mainTip), "add suppression")
-
-            val result = os
-              .proc(
-                cs,
-                "launch",
-                s"com.adtechnacity:mill-githooks_mill1_3:$version",
-                "--main-class",
-                "atn.mill.VerifyMain",
-                "--",
-                "--repo",
-                gitDirOf(git).toString
-              )
-              .call(
-                cwd = gitDirOf(git),
-                env = Map("COURSIER_REPOSITORIES" -> repos),
-                stdin = s"${sha(mainTip)} ${sha(pushed)} refs/heads/main\n",
-                check = false,
-                mergeErrIntoOut = true
-              )
-            assert(result.exitCode != 0)
-            assert((result.out.text() + result.err.text()).contains("unsigned"))
-          }
-        case _                                      =>
-          () // coursier binary not found, or COURSIER_REPOSITORIES/PLUGIN_VERSION not staged for this test run
+        val result = os
+          .proc(javaBin, "-cp", classpath, "atn.mill.VerifyMain", "--repo", gitDirOf(git).toString)
+          .call(
+            cwd = gitDirOf(git),
+            stdin = s"${sha(mainTip)} ${sha(pushed)} refs/heads/main\n",
+            check = false,
+            mergeErrIntoOut = true
+          )
+        assert(result.exitCode == 1)
+        assert(result.out.text().contains("unsigned"))
       }
     }
   }
