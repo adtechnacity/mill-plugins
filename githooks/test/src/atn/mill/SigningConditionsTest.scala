@@ -59,7 +59,9 @@ object SigningConditionsTest extends TestSuite {
           "val x = 1 // NOSONAR",
           "// @codescene(disable:\"Complex Method\")",
           "@nowarn(\"cat=deprecation\")",
-          "@SuppressWarnings(Array(\"unchecked\"))"
+          "@SuppressWarnings(Array(\"unchecked\"))",
+          "// $COVERAGE-OFF$",
+          "scalacOptions ++= Seq(\"-Wconf:any:s\")"
         )
         markers.foreach { line =>
           val reasons = exception.appliesTo(Vector(file("A.scala", added = Seq(1 -> line))))
@@ -184,15 +186,49 @@ object SigningConditionsTest extends TestSuite {
         assert(testProtection.appliesTo(cs).isEmpty)
       }
 
-      test("helper edit outside any case region never fires") {
-        val cs = Vector(
+      test("helper edit before the first case fires as scaffolding") {
+        val cs      = Vector(
           file(
             testPath,
             added = Seq(2 -> "object Helpers { def shared = 2 }"),
             old = Some(suite -> Seq(2 -> "object Helpers { def shared = 1 }"))
           )
         )
-        assert(testProtection.appliesTo(cs).isEmpty)
+        val reasons = testProtection.appliesTo(cs)
+        assert(reasons.size == 1)
+        assert(reasons.head.detail.contains("scaffolding"))
+      }
+
+      test("removing an import, a comment or a blank line before the first case never fires") {
+        val withImport = "package x\n\nimport scala.util.Try\n// shared helpers\n" + suite.stripPrefix("package x\n")
+        val removed    = Seq(2 -> "", 3 -> "import scala.util.Try", 4 -> "// shared helpers")
+        assert(testProtection.appliesTo(Vector(file(testPath, old = Some(withImport -> removed)))).isEmpty)
+      }
+
+      test("editing a case-less shared test-support file fires as scaffolding") {
+        val support = "package x\nobject Support {\n  def check(a: Int) = assert(a > 0)\n}\n"
+        val cs      = Vector(
+          file(
+            "test-support/src/atn/mill/Support.scala",
+            added = Seq(3 -> "  def check(a: Int) = ()"),
+            old = Some(support -> Seq(3 -> "  def check(a: Int) = assert(a > 0)"))
+          )
+        )
+        assert(testProtection.appliesTo(cs).exists(_.detail.contains("scaffolding")))
+      }
+
+      test("the default test path covers common test roots and nothing that merely ends in 'test'") {
+        val testRoot = SigningConditions.DefaultTestPathPattern.r
+        Seq(
+          "githooks/test/src/A.scala",
+          "src/test/scala/A.scala",
+          "tests/A.scala",
+          "test-support/src/A.scala",
+          "example-tests/src/A.scala",
+          "integration-test/src/A.scala"
+        ).foreach(p => assert(testRoot.findFirstIn(p).isDefined))
+        Seq("contest/A.scala", "latest/A.scala", "src/main/scala/Test.scala")
+          .foreach(p => assert(testRoot.findFirstIn(p).isEmpty))
       }
 
       test("non-test files abstain entirely") {
@@ -203,7 +239,7 @@ object SigningConditionsTest extends TestSuite {
       test("rename out of the test root fires for its cases") {
         val cs      = Vector(file(testPath, old = Some(suite -> Nil), newPath = Some("attic/SomeTest.scala")))
         val reasons = testProtection.appliesTo(cs)
-        assert(reasons.size == 3)
+        assert(reasons.size == 4) // three cases plus the scaffolding before them
       }
 
       test("rename within the test root with no removals never fires") {
@@ -212,10 +248,10 @@ object SigningConditionsTest extends TestSuite {
         assert(testProtection.appliesTo(cs).isEmpty)
       }
 
-      test("whole-file deletion fires once per case") {
+      test("whole-file deletion fires once per case and once for the scaffolding") {
         val allLines = suite.linesIterator.toVector.zipWithIndex.map { case (t, i) => i + 1 -> t }
         val cs       = Vector(file(testPath, old = Some(suite -> allLines), newPath = None))
-        assert(testProtection.appliesTo(cs).size == 3)
+        assert(testProtection.appliesTo(cs).size == 4)
       }
 
       test("merge: case deleted relative to all parents fires") {

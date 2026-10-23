@@ -86,9 +86,11 @@ final case class UndiffableChange(sourcePattern: String) extends SigningConditio
 /**
  * Case-level test protection. Files whose old path lies under a test root have their test-case regions located in the
  * old revision (a region spans a case-pattern header line to the line before the next header); a removed line inside a
- * region marks that case as removed or modified. Pure insertions never fire — a known, documented boundary. Renaming a
- * case-bearing file out of the test root counts as removing its cases. For merge commits a case fires only when every
- * parent leg is affected (content a branch already removed was verified there).
+ * region marks that case as removed or modified. Everything before the first header — shared helpers, fixtures, a
+ * case-less test-support file — is one more region, the scaffolding, so weakening a helper every case relies on fires
+ * too; removing only imports, comments, blank lines or bare braces there does not. Pure insertions never fire — a
+ * known, documented boundary. Renaming a test file out of the test root counts as removing all its regions. For merge
+ * commits a region fires only when every parent leg is affected (content a branch already removed was verified there).
  */
 final case class TestProtection(testPathPattern: String, casePatterns: Seq[String]) extends SigningCondition {
   val name = "test-protection"
@@ -98,20 +100,35 @@ final case class TestProtection(testPathPattern: String, casePatterns: Seq[Strin
 
   private def isTest(path: String): Boolean = testPath.findFirstIn(path).isDefined
 
-  /** (startLine, endLine, header) for each case region in `content`, 1-based inclusive. */
+  /** A scaffolding line whose removal cannot weaken a test. */
+  private def trivial(line: String): Boolean = TestProtection.Trivial.matches(line)
+
+  /**
+   * (startLine, endLine, header) for each region in `content`, 1-based inclusive: the scaffolding before the first case
+   * (when it holds anything but trivial lines), then one per case.
+   */
   private def regions(content: String): Vector[(Int, Int, String)] = {
-    val lines   = content.split("\n", -1).toVector
-    val headers = lines.zipWithIndex.collect {
+    val lines       = content.split("\n", -1).toVector
+    val headers     = lines.zipWithIndex.collect {
       case (l, i) if cases.exists(_.findFirstIn(l).isDefined) => (i + 1, l.trim)
     }
-    headers.zipWithIndex.map { case ((start, header), idx) =>
+    val preambleEnd = headers.headOption.map(_._1 - 1).getOrElse(lines.size)
+    val scaffolding =
+      Option.when(lines.take(preambleEnd).exists(!trivial(_)))((1, preambleEnd, TestProtection.Scaffolding))
+    scaffolding.toVector ++ headers.zipWithIndex.map { case ((start, header), idx) =>
       (start, headers.lift(idx + 1).map(_._1 - 1).getOrElse(lines.size), header)
     }
   }
 
   private def affectedCases(leg: ParentLeg): Set[String] = {
     val rs = regions(leg.oldContent())
-    leg.removed.flatMap(l => rs.collect { case (s, e, header) if l.number >= s && l.number <= e => header }).toSet
+    leg.removed.flatMap { l =>
+      rs.collect {
+        case (s, e, header)
+            if l.number >= s && l.number <= e && !(header == TestProtection.Scaffolding && trivial(l.text)) =>
+          header
+      }
+    }.toSet
   }
 
   def appliesTo(changes: GitDiff.ChangeSet): Vector[SigningReason] =
@@ -123,16 +140,29 @@ final case class TestProtection(testPathPattern: String, casePatterns: Seq[Strin
         val affected =
           if (escaped) regions(testLegs.head.oldContent()).map(_._3).toSet
           else testLegs.map(affectedCases).reduce(_ intersect _)
-        affected.toVector.sorted.map(header =>
-          SigningReason(name, s"${f.path}: test case removed or modified: '$header'")
-        )
+        affected.toVector.sorted.map {
+          case TestProtection.Scaffolding => SigningReason(name, s"${f.path}: test scaffolding removed or modified")
+          case header                     => SigningReason(name, s"${f.path}: test case removed or modified: '$header'")
+        }
       }
     }
 }
 
+object TestProtection {
+
+  /** The region label for everything before a test file's first case. */
+  private[mill] val Scaffolding = "(scaffolding)"
+
+  /** Blank lines, imports, package clauses, comments and lines of bare braces or parentheses. */
+  private val Trivial: Regex = """\s*(import\b.*|package\b.*|//.*|/\*.*|\*.*|[{}()\s]*)""".r
+}
+
 object SigningConditions {
 
-  /** Suppression markers for scalafmt, scalafix, scalastyle, Sonar, CodeScene, and compiler-level suppression. */
+  /**
+   * Suppression markers for scalafmt, scalafix, scalastyle, Sonar, CodeScene, scoverage exclusions, and compiler-level
+   * suppression (annotations, and `-Wconf` options in a build file).
+   */
   val DefaultMarkers: Seq[String] = Seq(
     """format:\s*off""",
     """scalafix:(?:off|ok)""",
@@ -140,11 +170,16 @@ object SigningConditions {
     """NOSONAR""",
     """@codescene\(disable""",
     """@nowarn""",
-    """@SuppressWarnings"""
+    """@SuppressWarnings""",
+    """\$COVERAGE-OFF\$""",
+    """-Wconf"""
   )
 
-  /** Mill (`module/test/src`) and sbt/maven (`src/test`) test roots both contain a `test/` segment. */
-  val DefaultTestPathPattern: String = "(^|/)test/"
+  /**
+   * Test roots: a `test/` or `tests/` segment (Mill's `module/test/src`, sbt/maven's `src/test`), and hyphenated ones
+   * such as `test-support/`, `example-tests/` or `integration-test/` that hold shared or out-of-module test code.
+   */
+  val DefaultTestPathPattern: String = "(^|/)(tests?|tests?-[^/]+|[^/]+-tests?)/"
 
   /** utest `test("…")` and ScalaCheck `property("…")` case headers. */
   val DefaultCasePatterns: Seq[String] = Seq("""\btest\s*\(\s*"""", """\bproperty\s*\(\s*"""")
