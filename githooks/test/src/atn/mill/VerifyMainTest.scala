@@ -29,13 +29,31 @@ object VerifyMainTest extends TestSuite {
   def keyFile(name: String, ring: org.bouncycastle.openpgp.PGPPublicKeyRing) =
     s"$trustedKeysPath/$name.asc" -> armorRing(ring)
 
+  /** Commits `signer`'s key into the trust store; returns the new tip, the base a pushed commit builds on. */
+  def trustKey(git: Git, dir: os.Path, signer: org.bouncycastle.openpgp.PGPKeyPair): ObjectId = {
+    val (path, armored) = keyFile("signer", keyRing(signer))
+    commitFile(git, dir, path, armored, "add key")
+    git.getRepository.resolve("HEAD")
+  }
+
+  /** `commitsToVerify` over `c1..c3` — two commits — under the ceiling `maxCommits`. */
+  def twoCommitRange(maxCommits: Int) = withRepo { (dir, git) =>
+    val c1 = commitFile(git, dir, "a.txt", "1", "c1")
+    commitFile(git, dir, "a.txt", "2", "c2")
+    val c3 = commitFile(git, dir, "a.txt", "3", "c3")
+    VerifyMain.commitsToVerify(
+      git.getRepository,
+      VerifyMain.RefUpdate(c1.getName, c3.getName, "refs/heads/main"),
+      maxCommits
+    )
+  }
+
   val tests = Tests {
 
     test("a trusted-signed commit tripping a marker condition passes (exit 0)") {
       withRepo { (dir, git) =>
         val signer  = genKeyPair()
-        commitFile(git, dir, keyFile("signer", keyRing(signer))._1, keyFile("signer", keyRing(signer))._2, "add key")
-        val mainTip = git.getRepository.resolve("HEAD")
+        val mainTip = trustKey(git, dir, signer)
         val pushed  = signedCommit(git, Map("Foo.scala" -> "// NOSONAR\n"), Seq(mainTip), "add suppression", signer)
 
         val (code, failures) =
@@ -53,8 +71,7 @@ object VerifyMainTest extends TestSuite {
     test("an unsigned commit tripping a condition fails, naming the commit and the condition") {
       withRepo { (dir, git) =>
         val signer  = genKeyPair()
-        commitFile(git, dir, keyFile("signer", keyRing(signer))._1, keyFile("signer", keyRing(signer))._2, "add key")
-        val mainTip = git.getRepository.resolve("HEAD")
+        val mainTip = trustKey(git, dir, signer)
         val pushed  = rawCommit(git, Map("Foo.scala" -> "// NOSONAR\n"), Seq(mainTip), "add suppression")
 
         val (code, failures) =
@@ -187,28 +204,14 @@ object VerifyMainTest extends TestSuite {
     }
 
     test("a range exceeding the commit ceiling fails closed") {
-      withRepo { (dir, git) =>
-        val c1     = commitFile(git, dir, "a.txt", "1", "c1")
-        commitFile(git, dir, "a.txt", "2", "c2")
-        val c3     = commitFile(git, dir, "a.txt", "3", "c3")
-        val update = VerifyMain.RefUpdate(c1.getName, c3.getName, "refs/heads/main")
-
-        val result = VerifyMain.commitsToVerify(git.getRepository, update, maxCommits = 1)
-        assert(result.isLeft)
-        assert(result.left.exists(_.contains("resource ceiling")))
-      }
+      val result = twoCommitRange(maxCommits = 1)
+      assert(result.isLeft)
+      assert(result.left.exists(_.contains("resource ceiling")))
     }
 
     test("a range within the commit ceiling is returned in full") {
-      withRepo { (dir, git) =>
-        val c1     = commitFile(git, dir, "a.txt", "1", "c1")
-        commitFile(git, dir, "a.txt", "2", "c2")
-        val c3     = commitFile(git, dir, "a.txt", "3", "c3")
-        val update = VerifyMain.RefUpdate(c1.getName, c3.getName, "refs/heads/main")
-
-        val result = VerifyMain.commitsToVerify(git.getRepository, update, maxCommits = 2)
-        assert(result.exists(_.size == 2))
-      }
+      val result = twoCommitRange(maxCommits = 2)
+      assert(result.exists(_.size == 2))
     }
 
     test("a malformed stdin line is a clear error, not an exception") {
@@ -238,8 +241,7 @@ object VerifyMainTest extends TestSuite {
         case (Some(cs), Some(repos), Some(version)) =>
           withRepo { (dir, git) =>
             val signer  = genKeyPair()
-            commitFile(git, dir, keyFile("signer", keyRing(signer))._1, keyFile("signer", keyRing(signer))._2, "add key")
-            val mainTip = git.getRepository.resolve("HEAD")
+            val mainTip = trustKey(git, dir, signer)
             val pushed  = rawCommit(git, Map("Foo.scala" -> "// NOSONAR\n"), Seq(mainTip), "add suppression")
 
             val result = os
