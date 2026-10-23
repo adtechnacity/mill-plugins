@@ -168,6 +168,8 @@ Decision matrix (engine outcomes, encoded as tests in Unit 3):
 
 **Dependencies:** None (start after the in-flight githooks branch lands)
 
+> **Coordination note (2026-08-20):** `GitDiff.scala` is now **owned by the conditional-commit-signing plan** (`docs/plans/2026-08-20-001-feat-conditional-commit-signing-plan.md`, its Unit 1), which builds the accessors signing consumes (staged/per-commit/merge-combined views, raw-diff mode, Mill-API-free error types, MiMa-excluded until surface review). TSA-only accessors — `firstParentCommits`, submodule flags, merge-base — are deliberately **not** pre-built there; this unit **extends the same file** with them when TSA lands (or creates the file to the signing plan's spec plus these accessors if TSA somehow lands first). Follow the signing plan's constraints when extending: no `mill.api` types, raw diffs. The same plan owns the pre-push stdin `while read` block's shape (its enforcing `verifyRange` call comes first); Unit 5 here adds the exit-0-guarded advisory line inside that existing block when present.
+
 **Files:**
 - Create: `githooks/src/atn/mill/GitDiff.scala`
 - Test: `githooks/test/src/atn/mill/GitDiffTest.scala`

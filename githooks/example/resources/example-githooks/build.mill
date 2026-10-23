@@ -27,6 +27,12 @@ object git extends GitHooksModule {
 
   // Exclude non-application modules from commit scope validation
   override def excludedModuleNames = Set("test", "integration", "docker")
+
+  // Trust store for conditional commit signing; enforcement activates once this holds a key
+  override def trustedKeysDir = ".mill-signing/trusted-keys"
+
+  // Extra paths guarded by the built-in ProtectedPaths signing condition
+  override def protectedPathGlobs = Seq(".mill-signing/**", ".scalafmt.conf", "deploy/**")
 }
 
 /** Usage
@@ -37,5 +43,7 @@ object git extends GitHooksModule {
 ...prepCommit...
 ...validateCommit...
 ...prePush...
+...checkSigning...
+...verifyRange...
 
 */

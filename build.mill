@@ -207,21 +207,49 @@ object githooks extends MillPluginModule with MillPluginMutation {
   def mvnDeps      = Seq(
     mvn"org.kapunga::fallatol-ollama:0.3.1",
     mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.0.202609011348-r",
-    mvn"com.lihaoyi::mainargs:0.7.8"
+    // Version must stay in lockstep with the jgit core dep; brings the BouncyCastle PGP stack
+    // (bcpg/bcprov) used by SigningVerify.
+    mvn"org.eclipse.jgit:org.eclipse.jgit.gpg.bc:7.8.0.202609011348-r",
+    mvn"com.lihaoyi::mainargs:0.7.8",
+    // os.Path/os.* is used throughout the Mill-free layer (GitDiff, SigningConditions, SigningVerify,
+    // VerifyMain) but isn't itself Mill API — normally it only reaches the classpath via Mill's
+    // provided-scope mill-libs, which VerifyMain's standalone launch never has. Explicit runtime dep,
+    // at the version of the os-lib this build runs on (Mill's own), so a Mill upgrade moves it too.
+    mvn"com.lihaoyi::os-lib:$millOsLibVersion"
   )
+
+  private def millOsLibVersion: String =
+    Option(classOf[os.Path].getPackage.getImplementationVersion)
+      .getOrElse(sys.error("os-lib on Mill's classpath carries no Implementation-Version"))
 
   // GitInstall is an internal helper (only GitHooksModule.install constructs it); the added
   // prePushExtraCommands param is defaulted, so the constructor change is source-compatible.
+  // GitDiff and its records are internal diff plumbing shared with the planned TSA feature;
+  // excluded from MiMa until both consumers have landed and the surface is reviewed.
   override def mimaBinaryIssueFilters =
-    super.mimaBinaryIssueFilters() ++ Seq(ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.GitInstall.this"))
+    super.mimaBinaryIssueFilters() ++ Seq(
+      ProblemFilter.exclude[DirectMissingMethodProblem]("atn.mill.GitInstall.this"),
+      ProblemFilter.exclude[Problem]("atn.mill.GitDiff*"),
+      ProblemFilter.exclude[Problem]("atn.mill.DiffLine*"),
+      ProblemFilter.exclude[Problem]("atn.mill.ParentLeg*"),
+      ProblemFilter.exclude[Problem]("atn.mill.ChangedFile*")
+    )
 
   def strykerTestModule = test
 
-  object test    extends MillPluginTests        {
+  object test extends MillPluginTests {
     // GitPrepCommit reads OLLAMA_URL and OLLAMA_MODEL ahead of its constructor arguments. Pin both so the suite is
     // deterministic whatever the developer's shell exports: an empty OLLAMA_URL falls back to the configured
     // ollamaUrl (the tests' fake server), and OLLAMA_MODEL is the name GitPrepCommitTest expects to win.
-    def forkEnv = Task(super.forkEnv() ++ Map("OLLAMA_URL" -> "", "OLLAMA_MODEL" -> "test-model-from-env"))
+    // VERIFY_MAIN_CLASSPATH is githooks' runtime classpath — no provided-scope Mill API — for VerifyMainTest's smoke
+    // test, which runs VerifyMain on it the way a server's pre-receive hook does.
+    override def forkEnv = Task {
+      super.forkEnv() ++ Map(
+        "OLLAMA_URL"            -> "",
+        "OLLAMA_MODEL"          -> "test-model-from-env",
+        "VERIFY_MAIN_CLASSPATH" -> githooks.runClasspath().map(_.path.toString).mkString(java.io.File.pathSeparator)
+      )
+    }
   }
   object example extends MillPluginExampleTests {
     def pluginModules = Seq(core, githooks)
