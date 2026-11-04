@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.1] - 2026-11-04
+
+### Dependencies
+
+- **cpd**: default `pmdVersion` 7.27.0 → 7.29.0
+- **pulumi**: pulumi 1.37.7 → 1.39.0; default `pulumiSdkVersion` 1.13.2 → 1.39.0
+- **sonar**: logback-classic 1.6.5 → 1.6.6
+
+### Other
+
+- meta-build: dogfood mill-release, mill-stryker4s and mill-cpd 1.4.0
+
 ## [1.4.0] - 2026-10-23
 
 ### Added
