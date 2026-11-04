@@ -73,7 +73,7 @@ object PulumiTasksTest extends TestSuite:
 
     test("defaults - the documented values, the services-merging assembly rule and no shell prelude") {
       val infra = new DefaultBuild().infra
-      assert(infra.pulumiSdkVersion == "1.13.2")
+      assert(infra.pulumiSdkVersion == "1.39.0")
       assert(infra.pulumiProjectName == "infra")
       assert(infra.pulumiStack == "dev")
       assert(infra.pulumiCli == "pulumi")
@@ -93,12 +93,12 @@ object PulumiTasksTest extends TestSuite:
       val plain      = new DefaultBuild
       UnitTester(plain, workspace()).scoped { eval =>
         assert(
-          ran(eval)(plain.infra.mvnDeps).map(_.toString).exists(d => d.contains("com.pulumi") && d.contains("1.13.2"))
+          ran(eval)(plain.infra.mvnDeps).map(_.toString).exists(d => d.contains("com.pulumi") && d.contains("1.39.0"))
         )
         assert(!ran(eval)(plain.infra.compileMvnDeps).exists(_.toString.contains("jsr305")))
         assert(ran(eval)(plain.infra.prependShellScript) == "")
         val names = ran(eval)(plain.infra.compileClasspath).map(_.path.last)
-        assert(names.contains("pulumi-1.13.2.jar"))
+        assert(names.contains("pulumi-1.39.0.jar"))
         assert(names.exists(_.startsWith("protobuf-java-")))
       }
       val configured = new ConfiguredBuild

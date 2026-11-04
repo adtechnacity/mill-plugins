@@ -30,7 +30,7 @@ object CpdSupportTest extends TestSuite:
     test("defaults - every knob has the documented default and cpdCheckAll is the default task") {
       val cpd = new DefaultBuild().cpd
       assert(cpd.defaultTask() == "cpdCheckAll")
-      assert(cpd.pmdVersion == "7.27.0")
+      assert(cpd.pmdVersion == "7.29.0")
       assert(cpd.cpdLanguages == Seq("scala", "java"))
       assert(cpd.cpdMinimumTokens == 25)
       assert(cpd.cpdErrorTokens == 75)
@@ -49,7 +49,7 @@ object CpdSupportTest extends TestSuite:
         val deps = value(eval(build.cpd.cpdMvnDeps))
         assert(deps.map(_.dep.module.name.value) == Seq("pmd-scala_2.13", "pmd-java"))
         assert(deps.forall(_.dep.module.organization.value == "net.sourceforge.pmd"))
-        assert(deps.forall(_.toString.contains("7.27.0")))
+        assert(deps.forall(_.toString.contains("7.29.0")))
       }
     }
 

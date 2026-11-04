@@ -27,7 +27,7 @@ import mill.util.Jvm
  * workspace is not rescanned and `./mill show cpd` prints the count from cache; failures are never cached.
  *
  * PMD runs in a subprocess (`net.sourceforge.pmd.cli.PmdCli`) on a classpath resolved from [[pmdVersion]] and
- * [[cpdMvnDeps]], with the build's environment. Tested against PMD 7.27.0; other 7.x versions are expected to work.
+ * [[cpdMvnDeps]], with the build's environment. Tested against PMD 7.29.0; other 7.x versions are expected to work.
  */
 trait CpdSupport extends DefaultTaskModule with CoursierModule:
 
@@ -42,7 +42,7 @@ trait CpdSupport extends DefaultTaskModule with CoursierModule:
   def defaultTask(): String = "cpdCheckAll"
 
   /** PMD version used for the CLI and the language modules. Defaults to the version this plugin is tested with. */
-  def pmdVersion: String = "7.27.0"
+  def pmdVersion: String = "7.29.0"
 
   /**
    * CPD language ids, one CPD run and one report each; `scala` and `java` by default. Extend with e.g.

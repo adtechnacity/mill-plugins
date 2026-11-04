@@ -34,7 +34,7 @@ import scala.util.Using
 trait PulumiModule extends ScalaModule {
 
   /** Version of the com.pulumi:pulumi Java SDK added to this module's dependencies. */
-  def pulumiSdkVersion: String = "1.13.2"
+  def pulumiSdkVersion: String = "1.39.0"
 
   /** Pulumi project name written to the generated Pulumi.yaml. */
   def pulumiProjectName: String = moduleSegments.render
