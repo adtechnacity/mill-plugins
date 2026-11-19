@@ -122,7 +122,7 @@ object duplication extends CpdSupport {
 
 object core extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-core_mill1"
-  def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3", mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.0.202609011348-r")
+  def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3", mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.1.202611041320-r")
 
   def strykerTestModule = test
 
@@ -135,7 +135,10 @@ object stryker4s extends MillPluginModule with MillPluginMutation {
   def mvnDeps      = Seq(
     mvn"io.stryker-mutator::stryker4s-core:1.1.1",
     mvn"io.stryker-mutator::stryker4s-command-runner:1.1.1",
-    mvn"co.fs2::fs2-core:3.14.0"
+    // stryker4s-core brings fs2-core and fs2-io at its own (older) version; override both together, never
+    // fs2-core alone, so the fs2 family stays on one version (MillProcessTestRunner uses fs2.io directly).
+    mvn"co.fs2::fs2-core:3.16.0",
+    mvn"co.fs2::fs2-io:3.16.0"
   )
 
   def strykerTestModule = test
@@ -168,7 +171,7 @@ object stryker4s extends MillPluginModule with MillPluginMutation {
 
 object scalafix extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-scalafix_mill1"
-  def mvnDeps      = Seq(mvn"com.goyeau::mill-scalafix_mill1:0.6.2", mvn"ch.epfl.scala:scalafix-interfaces:0.14.9")
+  def mvnDeps      = Seq(mvn"com.goyeau::mill-scalafix_mill1:0.6.2", mvn"ch.epfl.scala:scalafix-interfaces:0.14.10")
 
   def strykerTestModule = test
 
@@ -206,10 +209,10 @@ object githooks extends MillPluginModule with MillPluginMutation {
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
     mvn"org.kapunga::fallatol-ollama:0.3.1",
-    mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.0.202609011348-r",
+    mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.1.202611041320-r",
     // Version must stay in lockstep with the jgit core dep; brings the BouncyCastle PGP stack
     // (bcpg/bcprov) used by SigningVerify.
-    mvn"org.eclipse.jgit:org.eclipse.jgit.gpg.bc:7.8.0.202609011348-r",
+    mvn"org.eclipse.jgit:org.eclipse.jgit.gpg.bc:7.8.1.202611041320-r",
     mvn"com.lihaoyi::mainargs:0.7.8",
     // os.Path/os.* is used throughout the Mill-free layer (GitDiff, SigningConditions, SigningVerify,
     // VerifyMain) but isn't itself Mill API — normally it only reaches the classpath via Mill's
@@ -260,8 +263,8 @@ object sonar extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-sonar_mill1"
   def moduleDeps   = Seq(core)
   def mvnDeps      = Seq(
-    mvn"org.sonarsource.scanner.lib:sonar-scanner-java-library:4.2.1.1698",
-    mvn"ch.qos.logback:logback-classic:1.6.6",
+    mvn"org.sonarsource.scanner.lib:sonar-scanner-java-library:4.3.0.11766",
+    mvn"ch.qos.logback:logback-classic:1.6.8",
     mvn"org.typelevel::cats-core:2.13.0"
   )
 
@@ -287,7 +290,7 @@ object release extends MillPluginModule with MillPluginMutation {
 
 object pulumi extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-pulumi_mill1"
-  def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.39.0")
+  def mvnDeps      = Seq(mvn"com.pulumi:pulumi:1.40.2")
 
   // First released in 0.8.0, so that is the baseline rather than the repo-wide 0.3.0.
   override def mimaPreviousVersions = Seq("0.8.0")
