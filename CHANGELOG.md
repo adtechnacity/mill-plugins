@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.4.2] - 2026-11-19
+
+### Fixed
+
+- **stryker4s**: the testrunner fallback version, used only when the stryker4s jar carries no
+  Implementation-Version, is now 1.1.1 instead of 0.21.0, which has no `stryker4s-testrunner` artifact
+
+### Dependencies
+
+- **core**: org.eclipse.jgit 7.8.0.202609011348-r → 7.8.1.202611041320-r
+- **githooks**: org.eclipse.jgit and org.eclipse.jgit.gpg.bc 7.8.0.202609011348-r → 7.8.1.202611041320-r
+- **pulumi**: pulumi 1.39.0 → 1.40.2; default `pulumiSdkVersion` 1.39.0 → 1.40.2
+- **scalafix**: scalafix-interfaces 0.14.9 → 0.14.10
+- **sonar**: sonar-scanner-java-library 4.2.1.1698 → 4.3.0.11766, logback-classic 1.6.6 → 1.6.8
+- **stryker4s**: fs2-core 3.14.0 → 3.16.0, with fs2-io pinned at the same version (was 3.13.0 via stryker4s-core)
+
+### Other
+
+- meta-build: dogfood mill-release, mill-stryker4s and mill-cpd 1.4.1
+- add an update-dependencies Claude skill
+
 ## [1.4.1] - 2026-11-04
 
 ### Dependencies
