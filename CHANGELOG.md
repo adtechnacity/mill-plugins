@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.5.0] - 2026-11-23
+
+### Added
+
+- **codescene**: add CodeScene analysis, rules, and HTTP coverage upload plugin
+
+### Other
+
+- set next development version 1.4.3-SNAPSHOT
+
 ## [1.4.2] - 2026-11-19
 
 ### Fixed
