@@ -45,7 +45,7 @@ object GitRepoTest extends TestSuite:
     case Result.Success(v) => v
     case failure           => throw new java.lang.AssertionError(s"expected a success, got $failure")
 
-  private def error(result: Result[String]): String = result match
+  private def error(result: Result[?]): String = result match
     case f: Result.Failure => f.error
     case success           => throw new java.lang.AssertionError(s"expected a failure, got $success")
 
@@ -96,4 +96,22 @@ object GitRepoTest extends TestSuite:
       assert(value(GitRepo.headSHA()).matches("[0-9a-f]{40}"))
       assert(value(GitRepo.headBranch()).nonEmpty)
       assert(value(GitRepo.headTag()).nonEmpty)
+    }
+
+    test("open - finds the git repository containing a directory or fails when absent") {
+      val git   = repository(1)
+      val sub   = os.Path(git.getRepository.getWorkTree) / "nested" / "dir"
+      os.makeDir.all(sub)
+      val found = GitRepo.open(sub)
+      assert(value(GitRepo.shaOf(found)) == head(git).name)
+      assert(error(GitRepo.open(os.temp.dir())).nonEmpty)
+    }
+
+    test("remoteUrlOf - returns the configured remote URL or fails when missing") {
+      val git    = repository(1)
+      assert(error(GitRepo.remoteUrlOf(opened(git), "origin")).contains("origin"))
+      val config = git.getRepository.getConfig
+      config.setString("remote", "origin", "url", "https://github.com/example/repo.git")
+      config.save()
+      assert(value(GitRepo.remoteUrlOf(opened(git), "origin")) == "https://github.com/example/repo.git")
     }

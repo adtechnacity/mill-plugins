@@ -350,3 +350,19 @@ object cpd extends MillPluginModule with MillPluginMutation {
     def pluginModules = Seq(cpd)
   }
 }
+
+object codescene extends MillPluginModule with MillPluginMutation {
+  def artifactName = "mill-codescene_mill1"
+  def moduleDeps   = Seq(core)
+  def mvnDeps      = Seq(mvn"com.lihaoyi::requests:0.9.3", mvn"com.lihaoyi::upickle:4.4.3")
+
+  // Not yet released: override mimaPreviousArtifacts to empty and skip reporting until the first release exists.
+  override def mimaPreviousArtifacts   = Task { Seq.empty }
+  override def mimaReportBinaryIssues() = Task.Command { () }
+  def strykerTestModule = test
+
+  object test    extends MillPluginTests
+  object example extends MillPluginExampleTests {
+    def pluginModules = Seq(core, codescene)
+  }
+}

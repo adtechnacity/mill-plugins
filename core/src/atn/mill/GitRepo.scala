@@ -16,6 +16,16 @@ object GitRepo:
 
   def headTag() = tagOf(repo)
 
+  /** Opens the git repository containing `dir` (walking parent directories). */
+  def open(dir: os.Path): Result[Repository] =
+    val builder = new RepositoryBuilder().findGitDir(dir.toIO)
+    Option(builder.getGitDir) match
+      case Some(_) => Result.Success(builder.setMustExist(true).build())
+      case None    => Result.Failure(s"No git repository found at or above $dir")
+
+  /** URL of the given git remote (defaults to `"origin"`). */
+  def remoteUrl(remote: String = "origin"): Result[String] = remoteUrlOf(repo, remote)
+
   // The three accessors above read `repo`, which is bound once to the process working directory; these take the
   // repository explicitly so that every path (unborn HEAD, tags, describe) is reachable from a test.
 
@@ -37,3 +47,10 @@ object GitRepo:
           .setAlways(true)
           .setTags(true)
           .call()
+
+  /** [[remoteUrl]] of an explicitly opened repository. */
+  def remoteUrlOf(repo: Result[Repository], remote: String = "origin"): Result[String] =
+    repo.flatMap: r =>
+      Option(r.getConfig.getString("remote", remote, "url")).filter(_.nonEmpty) match
+        case Some(url) => Result.Success(url)
+        case None      => Result.Failure(s"Git remote '$remote' URL is not configured")

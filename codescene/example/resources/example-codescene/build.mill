@@ -1,0 +1,40 @@
+package build
+
+import mill._, scalalib._
+import atn.mill._
+
+object app extends ScalaModule with CodeSceneModule {
+  def scalaVersion = "3.9.0"
+
+  // Real builds leave `csCli` at its default ("cs" on PATH); this example uses a local stub so the
+  // example test runs hermetically without requiring the CodeScene CLI binary in CI.
+  override def csCli = (build.moduleDir / "stub-cs.sh").toString
+
+  override def codeSceneProdWarnScore  = 9.5
+  override def codeSceneProdErrorScore = 9.0
+  override def codeSceneTestWarnScore  = 8.0
+  override def codeSceneTestErrorScore = 7.0
+
+  object test extends ScalaTests {
+    def testFramework = "utest.runner.Framework"
+  }
+}
+
+/** Usage
+
+> ./mill resolve __
+...app.codeSceneAnalyze...
+...app.codeSceneWriteRules...
+...app.codeSceneUploadCoverage...
+
+> ./mill app.codeSceneWriteRules
+
+> cat .codescene/code-health-rules.json
+...matching_content_path...
+...app/test/src...
+> chmod +x stub-cs.sh
+
+> ./mill show app.codeSceneAnalyze
+0
+
+*/
