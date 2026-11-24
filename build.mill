@@ -307,7 +307,7 @@ object rel extends ReleaseModule
 
 object devx extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-devx_mill1"
-  def mvnDeps      = Seq(mvn"com.lihaoyi::requests:0.9.3", mvn"com.lihaoyi::upickle:4.4.3")
+  def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3")
 
   // The CodeScene and PortIO clients are traits of overridable defs (CodeSceneClient, PortIOClient) rather than
   // objects of reassignable vars: the setters of the former `var`s are gone, and the Port.io token cache is private.
@@ -354,7 +354,7 @@ object cpd extends MillPluginModule with MillPluginMutation {
 object codescene extends MillPluginModule with MillPluginMutation {
   def artifactName = "mill-codescene_mill1"
   def moduleDeps   = Seq(core)
-  def mvnDeps      = Seq(mvn"com.lihaoyi::requests:0.9.3", mvn"com.lihaoyi::upickle:4.4.3")
+  def mvnDeps      = Seq(mvn"com.lihaoyi::upickle:4.4.3")
 
   // Not yet released: override mimaPreviousArtifacts to empty and skip reporting until the first release exists.
   override def mimaPreviousArtifacts   = Task { Seq.empty }

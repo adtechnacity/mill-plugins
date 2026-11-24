@@ -15,7 +15,7 @@ Custom [Mill](https://mill-build.org/) build plugins for Scala projects.
 | release | `mill-release_mill1` | Changelog generation and release management | [example](release/example/resources/example-release/build.mill) |
 | pulumi | `mill-pulumi_mill1` | Pulumi infrastructure as Scala code, via the Automation API | [example](pulumi/example/resources/example-pulumi/build.mill) |
 | cpd | `mill-cpd_mill1` | Workspace-wide CPD (copy-paste detection) with warning/error token thresholds | [example](cpd/example/resources/example-cpd/build.mill) |
-| codescene | `mill-codescene_mill1` | Per-module CodeScene analysis (prod vs test rules/thresholds, no generated code) and HTTP coverage upload | [example](codescene/example/resources/example-codescene/build.mill) |
+| codescene | `mill-codescene_mill1` | Per-module CodeScene analysis (prod vs test rules/thresholds, no generated code) and `cs-coverage` upload | [example](codescene/example/resources/example-codescene/build.mill) |
 
 ## Usage
 

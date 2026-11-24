@@ -5,8 +5,7 @@ import mill.api.{BuildCtx, PathRef, Result, Task, TaskCtx}
 import mill.scalalib.*
 
 /**
- * Per-module CodeScene analysis, rules generation, and HTTP coverage upload for Mill `JavaModule` / `ScalaModule`
- * builds.
+ * Per-module CodeScene analysis, rules generation, and coverage upload for Mill `JavaModule` / `ScalaModule` builds.
  *
  * Mix into a module to get:
  *   - [[codeSceneAnalyze]]: runs `cs review --output-format json` over this module's hand-written `sources()` (never
@@ -24,7 +23,10 @@ trait CodeSceneModule extends JavaModule:
   /** CodeScene CLI executable (`cs` on `PATH` or an absolute path). */
   def csCli: String = "cs"
 
-  /** Extra environment variables passed to `cs` invocations. */
+  /** CodeScene coverage CLI executable (`cs-coverage` on `PATH` or an absolute path). */
+  def csCoverageCli: String = "cs-coverage"
+
+  /** Extra environment variables passed to `cs` and `cs-coverage` invocations. */
   def codeSceneEnv: Map[String, String] = Map.empty
 
   /**
@@ -63,26 +65,17 @@ trait CodeSceneModule extends JavaModule:
   /** Custom CodeScene threshold overrides emitted for test source directories by [[codeSceneWriteRules]]. */
   def codeSceneTestThresholds: Seq[CodeSceneRules.RuleThreshold] = Seq.empty
 
-  /**
-   * Base URL of the CodeScene API for coverage uploads (`https://api.codescene.io` for Cloud, or `<host>/api` for
-   * On-Prem).
-   */
-  def codeSceneApiUrl: String = "https://api.codescene.io"
+  /** On-prem CodeScene base URL (e.g. `https://codescene.example.com`), passed as `CS_ONPREM_URL`; `None` = Cloud. */
+  def codeSceneOnPremUrl: Option[String] = None
 
   /** Environment variable holding the CodeScene API access token. */
   def codeSceneTokenEnvVar: String = "CS_ACCESS_TOKEN"
 
-  /** Coverage report format passed to CodeScene (`cobertura` by default, matching Mill's `xmlCoberturaReport`). */
+  /** Coverage report format passed to `cs-coverage` (`cobertura` by default, matching Mill's `xmlCoberturaReport`). */
   def codeSceneCoverageFormat: String = "cobertura"
 
-  /** Coverage metric name sent in the upload metadata (`line-coverage` by default). */
+  /** Coverage metric passed to `cs-coverage` (`line-coverage` by default). */
   def codeSceneCoverageMetric: String = "line-coverage"
-
-  /** Git remote name used to determine `repo-url` for coverage uploads. */
-  def codeSceneGitRemote: String = "origin"
-
-  /** Optional monorepo subpath sent in coverage upload metadata (empty by default). */
-  def codeSceneCoverageSubpath: String = ""
 
   /**
    * Path to the coverage report file uploaded by [[codeSceneUploadCoverage]]. Defaults to this module's
@@ -198,36 +191,28 @@ trait CodeSceneModule extends JavaModule:
   }
 
   /**
-   * Uploads [[codeSceneCoverageReport]] directly to CodeScene's HTTP coverage upload API (no `cs-coverage` CLI
-   * required). Reads the API token from [[codeSceneTokenEnvVar]] in `Task.env` and git metadata (HEAD SHA, remote URL)
-   * from the workspace repository.
+   * Uploads [[codeSceneCoverageReport]] with `cs-coverage upload`, passing the token from [[codeSceneTokenEnvVar]] as
+   * `CS_ACCESS_TOKEN` and [[codeSceneOnPremUrl]] as `CS_ONPREM_URL`. Returns the CLI's output.
    */
   def codeSceneUploadCoverage() = Task.Command[String] {
-    val report = codeSceneCoverageReport().path
     Task.env.get(codeSceneTokenEnvVar).filter(_.nonEmpty) match
       case None        =>
         Result.Failure(s"$codeSceneTokenEnvVar is not set: export the CodeScene API token before uploading coverage")
       case Some(token) =>
-        val repo = GitRepo.open(BuildCtx.workspaceRoot)
-        for
-          sha     <- GitRepo.shaOf(repo)
-          repoUrl <- GitRepo.remoteUrlOf(repo, codeSceneGitRemote)
-          ref     <- CodeSceneCoverageUploader.upload(
-                       CodeSceneCoverageUploader.UploadRequest(
-                         apiBaseUrl = codeSceneApiUrl,
-                         token = token,
-                         commitSha = sha,
-                         repoUrl = repoUrl,
-                         repoPath = BuildCtx.workspaceRoot.toString,
-                         subpath = codeSceneCoverageSubpath,
-                         format = codeSceneCoverageFormat,
-                         metric = codeSceneCoverageMetric,
-                         reportFile = report
-                       )
-                     )
-        yield
-          Task.log.info(s"Uploaded $codeSceneCoverageFormat coverage report ($report) to CodeScene ($ref)")
-          ref
+        val cmd = Seq(csCoverageCli, "upload", "--format", codeSceneCoverageFormat, "--metric", codeSceneCoverageMetric)
+        val run = BuildCtx.withFilesystemCheckerDisabled {
+          os.call(
+            cmd = cmd :+ codeSceneCoverageReport().path.toString,
+            cwd = BuildCtx.workspaceRoot,
+            env = Task.env ++ codeSceneEnv ++ Map("CS_ACCESS_TOKEN" -> token) ++
+              codeSceneOnPremUrl.map("CS_ONPREM_URL" -> _),
+            mergeErrIntoOut = true,
+            check = false
+          )
+        }
+        val out = run.out.text().trim
+        if run.exitCode != 0 then Result.Failure(s"cs-coverage exited ${run.exitCode}\n$out")
+        else Result.Success(out)
   }
 
   private def collectSourceFiles(dirs: Seq[os.Path]): Seq[os.Path] =

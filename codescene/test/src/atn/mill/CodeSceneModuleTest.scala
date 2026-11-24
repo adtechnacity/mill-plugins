@@ -1,5 +1,4 @@
 package atn.mill
-import org.eclipse.jgit.api.Git
 
 import mill.*
 import mill.api.Discover
@@ -42,6 +41,24 @@ object CodeSceneModuleTest extends TestSuite:
          |""".stripMargin
     val bin    = dir / "fake-cs"
     os.write.over(bin, script, perms = "rwxr-xr-x")
+    bin
+
+  /**
+   * Writes a fake `cs-coverage` into `dir` recording its args and env there, printing `uploaded` and exiting
+   * `exitCode`.
+   */
+  private def fakeCsCoverage(dir: os.Path, exitCode: Int): os.Path =
+    val bin = dir / "fake-cs-coverage"
+    os.write.over(
+      bin,
+      s"""#!/bin/sh
+         |echo "$$*" > "$dir/args"
+         |echo "$$CS_ACCESS_TOKEN|$$CS_ONPREM_URL" > "$dir/env"
+         |echo uploaded
+         |exit $exitCode
+         |""".stripMargin,
+      perms = "rwxr-xr-x"
+    )
     bin
 
   abstract class BaseBuild(csBin: os.Path) extends TestRootModule:
@@ -87,10 +104,11 @@ object CodeSceneModuleTest extends TestSuite:
       override def codeSceneTokenEnvVar = "MILL_CODESCENE_UNSET_TOKEN_FOR_TEST"
     lazy val millDiscover = Discover[this.type]
 
-  class UploadBuild(baseUrl: String, report: os.Path) extends TestRootModule:
+  class UploadBuild(csCoverage: os.Path, report: os.Path) extends TestRootModule:
     object app extends ScalaModule with CodeSceneModule:
       def scalaVersion                     = "3.9.0"
-      override def codeSceneApiUrl         = baseUrl
+      override def csCoverageCli           = csCoverage.toString
+      override def codeSceneOnPremUrl      = Some("https://codescene.example.com")
       override def codeSceneTokenEnvVar    = "PATH" // guaranteed non-empty in Task.env
       override def codeSceneCoverageReport = Task(PathRef(report))
     lazy val millDiscover = Discover[this.type]
@@ -174,37 +192,23 @@ object CodeSceneModuleTest extends TestSuite:
         assert(msg.contains("MILL_CODESCENE_UNSET_TOKEN_FOR_TEST"))
       }
 
-    test("codeSceneUploadCoverage - reads git metadata and uploads report over HTTP"):
-      val ws      = os.temp.dir()
-      val git     = Git.init().setDirectory(ws.toIO).setInitialBranch("main").call()
-      val cfg     = git.getRepository.getConfig
-      cfg.setString("remote", "origin", "url", "https://github.com/example/sample.git")
-      cfg.save()
-      val headSha = git
-        .commit()
-        .setAllowEmpty(true)
-        .setSign(false)
-        .setAuthor("Test", "test@example.com")
-        .setCommitter("Test", "test@example.com")
-        .setMessage("init")
-        .call()
-        .getId
-        .name
-      val report  = ws / "cobertura.xml"
+    test("codeSceneUploadCoverage - runs cs-coverage upload with report, format, metric, token and on-prem URL"):
+      val ws                   = os.temp.dir()
+      val report               = ws / "cobertura.xml"
       os.write.over(report, "<coverage/>")
+      val bin                  = fakeCsCoverage(ws, exitCode = 0)
+      withBuild(new UploadBuild(bin, report), ws) { (build, eval) =>
+        assert(value(eval, build.app.codeSceneUploadCoverage()) == "uploaded")
+      }
+      assert(os.read(ws / "args").trim == s"upload --format cobertura --metric line-coverage $report")
+      val Array(token, onPrem) = os.read(ws / "env").trim.split('|')
+      assert(token.nonEmpty, onPrem == "https://codescene.example.com")
 
-      CodeSceneCoverageUploaderTest.withFakeServer {
-        case r if r.method == "POST" && r.path == "/v2/code-coverage/upload"      =>
-          (200, """{"ref":"/v2/code-coverage/upload/run-1"}""")
-        case r if r.method == "PUT" && r.path == "/v2/code-coverage/upload/run-1" =>
-          (200, """{"ok":true}""")
-      } { (baseUrl, requests) =>
-        withBuild(new UploadBuild(baseUrl, report), ws) { (build, eval) =>
-          val ref = value(eval, build.app.codeSceneUploadCoverage())
-          assert(ref == "/v2/code-coverage/upload/run-1")
-        }
-        val meta = ujson.read(requests().head.bodyText)
-        assert(meta("commit-sha").str == headSha)
-        assert(meta("repo-url").str == "https://github.com/example/sample.git")
-        assert(meta("format").str == "cobertura")
+    test("codeSceneUploadCoverage - surfaces cs-coverage's output when it fails"):
+      val ws     = os.temp.dir()
+      val report = ws / "cobertura.xml"
+      os.write.over(report, "<coverage/>")
+      withBuild(new UploadBuild(fakeCsCoverage(ws, exitCode = 3), report), ws) { (build, eval) =>
+        val msg = failureOf(eval(build.app.codeSceneUploadCoverage()))
+        assert(msg.contains("exited 3"), msg.contains("uploaded"))
       }
