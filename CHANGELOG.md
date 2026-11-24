@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.5.1] - 2026-11-24
+
+### Fixed
+
+- **codescene**: upload coverage with the cs-coverage CLI
+
+### Other
+
+- set next development version 1.5.1-SNAPSHOT
+
 ## [1.5.0] - 2026-11-23
 
 ### Added
